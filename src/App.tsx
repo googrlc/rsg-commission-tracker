@@ -37,10 +37,6 @@ import {
 } from 'recharts';
 import { CarrierRule, WonPolicy, ReconciliationStatement, CommissionMethod, CarrierSchedule } from './types';
 import {
-  INITIAL_RULES,
-  INITIAL_POLICIES,
-  INITIAL_RECONCILIATION,
-  INITIAL_S_SCHEDULES,
   formatCurrency,
   formatCurrencyDecimal,
   formatPercentage,
@@ -49,27 +45,29 @@ import {
   getStoredData,
   setStoredData
 } from './utils';
+import { useAuth } from './lib/auth';
+import * as repo from './data/repository';
+import { LogOut, RotateCw } from 'lucide-react';
 
 export default function App() {
-  // Local storage state keys
-  const RULES_STORAGE_KEY = 'rsg_commission_rules';
-  const POLICIES_STORAGE_KEY = 'rsg_won_policies';
-  const RECON_STORAGE_KEY = 'rsg_reconciliation';
+  const { email, signOut } = useAuth();
+
+  // Carrier pay-day calendars have no matching Supabase table yet, so they stay
+  // in localStorage (non-sensitive reference data — no client names/premiums).
   const SCHEDULES_STORAGE_KEY = 'rsg_carrier_schedules';
 
-  // State
-  const [rules, setRules] = useState<CarrierRule[]>(() =>
-    getStoredData<CarrierRule[]>(RULES_STORAGE_KEY, INITIAL_RULES)
-  );
-  const [policies, setPolicies] = useState<WonPolicy[]>(() =>
-    getStoredData<WonPolicy[]>(POLICIES_STORAGE_KEY, INITIAL_POLICIES)
-  );
-  const [reconciliations, setReconciliations] = useState<ReconciliationStatement[]>(() =>
-    getStoredData<ReconciliationStatement[]>(RECON_STORAGE_KEY, INITIAL_RECONCILIATION)
-  );
+  // State — rules/policies/reconciliations now load from Supabase (see effect).
+  const [rules, setRules] = useState<CarrierRule[]>([]);
+  const [policies, setPolicies] = useState<WonPolicy[]>([]);
+  const [reconciliations, setReconciliations] = useState<ReconciliationStatement[]>([]);
   const [schedules, setSchedules] = useState<CarrierSchedule[]>(() =>
-    getStoredData<CarrierSchedule[]>(SCHEDULES_STORAGE_KEY, INITIAL_S_SCHEDULES)
+    getStoredData<CarrierSchedule[]>(SCHEDULES_STORAGE_KEY, [])
   );
+
+  // Data-load lifecycle
+  const [dataLoading, setDataLoading] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'guide'>('recon');
   const [rulesSubTab, setRulesSubTab] = useState<'rules' | 'schedules'>('rules');
@@ -154,84 +152,42 @@ export default function App() {
     notes: ''
   });
 
-  // Track if any example rows are active
-  const hasExamples =
-    rules.some((r) => r.notes?.includes('EXAMPLE')) ||
-    policies.some((p) => p.notes?.includes('EXAMPLE')) ||
-    reconciliations.some((rc) => rc.notes?.includes('EXAMPLE')) ||
-    schedules.some((s) => s.notes?.includes('sched-')); // or example indicators
-
-  // Sync to localStorage
-  useEffect(() => {
-    setStoredData(RULES_STORAGE_KEY, rules);
-  }, [rules]);
-
-  useEffect(() => {
-    setStoredData(POLICIES_STORAGE_KEY, policies);
-  }, [policies]);
-
-  useEffect(() => {
-    setStoredData(RECON_STORAGE_KEY, reconciliations);
-  }, [reconciliations]);
-
+  // Persist only carrier schedules to localStorage (still local — see above).
   useEffect(() => {
     setStoredData(SCHEDULES_STORAGE_KEY, schedules);
   }, [schedules]);
 
-  // Actions
-  const handleClearAllExamples = () => {
-    if (confirm('Are you sure you want to delete all EXAMPLE rows to start fresh with your real rates?')) {
-      const cleanRules = rules.filter((r) => !r.notes?.includes('EXAMPLE'));
-      const cleanPolicies = policies.filter((p) => !p.notes?.includes('EXAMPLE'));
-      const cleanRecon = reconciliations.filter((rc) => !rc.notes?.includes('EXAMPLE'));
-
-      setRules(cleanRules);
-      setPolicies(cleanPolicies);
-      setReconciliations(cleanRecon);
-      // Keep real schedules or clear if requested - let's preserve schedules or reset them
+  // Load rules / policies / reconciliations from Supabase.
+  const loadData = async () => {
+    setDataLoading(true);
+    setDataError(null);
+    try {
+      const { rules, policies, reconciliations } = await repo.fetchAllData();
+      setRules(rules);
+      setPolicies(policies);
+      setReconciliations(reconciliations);
+    } catch (err) {
+      setDataError(err instanceof Error ? err.message : 'Failed to load data.');
+    } finally {
+      setDataLoading(false);
     }
   };
 
-  const handleResetToDefault = () => {
-    if (confirm('Would you like to reset the workspace to include the default Example Auto Co & INVO PEO template rows for demonstration?')) {
-      setRules(INITIAL_RULES);
-      setPolicies(INITIAL_POLICIES);
-      setReconciliations(INITIAL_RECONCILIATION);
-      setSchedules(INITIAL_S_SCHEDULES);
-    }
-  };
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const handleSyncMasterRules = () => {
-    let addedCount = 0;
-    const updatedRules = [...rules];
-
-    INITIAL_RULES.forEach((masterRule) => {
-      const exists = updatedRules.some(
-        (r) =>
-          r.carrier.trim().toLowerCase() === masterRule.carrier.trim().toLowerCase() &&
-          r.lineOfBusiness.trim().toLowerCase() === masterRule.lineOfBusiness.trim().toLowerCase() &&
-          r.newRenewal === masterRule.newRenewal
-      );
-
-      if (!exists) {
-        updatedRules.push(masterRule);
-        addedCount++;
-      }
-    });
-
-    setRules(updatedRules);
-    alert(`Successfully synchronized ${addedCount} real-world carrier rates from RSG's master catalog without affecting your existing custom rules!`);
-  };
-
-  // Rule Form Submit
-  const handleRuleSubmit = (e: React.FormEvent) => {
+  // Rule Form Submit — writes to Supabase (admin-only, enforced by RLS)
+  const handleRuleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ruleFormData.carrier || !ruleFormData.lineOfBusiness) {
       alert('Please fill out Carrier and Line of Business');
       return;
     }
+    if (saving) return;
 
-    const newRule: CarrierRule = {
+    const draft: CarrierRule = {
       id: `rule-${Date.now()}`,
       carrier: ruleFormData.carrier.trim(),
       lineOfBusiness: ruleFormData.lineOfBusiness.trim(),
@@ -243,23 +199,34 @@ export default function App() {
       notes: ruleFormData.notes?.trim() || ''
     };
 
-    setRules([newRule, ...rules]);
-    setShowRuleForm(false);
-    // Reset form
-    setRuleFormData({
-      carrier: '',
-      lineOfBusiness: '',
-      newRenewal: 'New',
-      method: '% of Premium',
-      ratePercentage: undefined,
-      flatOrPerEmployeeAmount: undefined,
-      paymentTiming: 'As Earned',
-      notes: ''
-    });
+    setSaving(true);
+    try {
+      const created = await repo.createRule(draft);
+      setRules([created, ...rules]);
+      setShowRuleForm(false);
+      // Reset form
+      setRuleFormData({
+        carrier: '',
+        lineOfBusiness: '',
+        newRenewal: 'New',
+        method: '% of Premium',
+        ratePercentage: undefined,
+        flatOrPerEmployeeAmount: undefined,
+        paymentTiming: 'As Earned',
+        notes: ''
+      });
+    } catch (err) {
+      alert(
+        `Could not save rule: ${err instanceof Error ? err.message : err}.\n` +
+          'Rule edits require an admin (Lamar) account.'
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Bulk Rule import handler
-  const handleBulkImportSubmit = (e: React.FormEvent) => {
+  const handleBulkImportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBulkImportError(null);
     setBulkImportSuccess(null);
@@ -404,22 +371,31 @@ export default function App() {
       return;
     }
 
-    setRules(prev => [...newRulesToInject, ...prev]);
-    setBulkImportSuccess(`Success! Imported ${newRulesToInject.length} custom commission rules into your rulebook.`);
-    setBulkImportText('');
-    setTimeout(() => {
-      setShowBulkImport(false);
-      setBulkImportSuccess(null);
-    }, 2500);
+    try {
+      const created = await repo.createRulesBulk(newRulesToInject);
+      setRules(prev => [...created, ...prev]);
+      setBulkImportSuccess(`Success! Imported ${created.length} custom commission rules into your rulebook.`);
+      setBulkImportText('');
+      setTimeout(() => {
+        setShowBulkImport(false);
+        setBulkImportSuccess(null);
+      }, 2500);
+    } catch (err) {
+      setBulkImportError(
+        `Could not save rules: ${err instanceof Error ? err.message : err}. ` +
+          'Rule edits require an admin (Lamar) account.'
+      );
+    }
   };
-  const handlePolicySubmit = (e: React.FormEvent) => {
+  const handlePolicySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!policyFormData.policyNumber || !policyFormData.clientName || !policyFormData.carrier || !policyFormData.lineOfBusiness) {
       alert('Please fill out Policy Number, Client Name, Carrier and Line of Business');
       return;
     }
+    if (saving) return;
 
-    const newPolicy: WonPolicy = {
+    const draft: WonPolicy = {
       id: `policy-${Date.now()}`,
       policyNumber: policyFormData.policyNumber.trim(),
       dateWon: policyFormData.dateWon || new Date().toISOString().split('T')[0],
@@ -437,36 +413,54 @@ export default function App() {
       notes: policyFormData.notes?.trim() || ''
     };
 
-    setPolicies([newPolicy, ...policies]);
-    setShowPolicyForm(false);
-    // Reset form
-    setPolicyFormData({
-      policyNumber: '',
-      dateWon: new Date().toISOString().split('T')[0],
-      clientName: '',
-      carrier: '',
-      lineOfBusiness: '',
-      newRenewal: 'New',
-      premiumAmount: undefined,
-      payrollAmount: undefined,
-      numberOfEmployees: undefined,
-      adminFeeAmount: undefined,
-      monthlyPremiumAmount: undefined,
-      paymentTiming: undefined,
-      manualExpectedAmount: undefined,
-      notes: ''
-    });
+    // Compute expected commission from the rulebook so the ledger row carries it.
+    const { expectedAmount } = lookupAndCalculate(draft, rules);
+
+    setSaving(true);
+    try {
+      const created = await repo.createPolicy(draft, expectedAmount);
+      setPolicies([created, ...policies]);
+      setShowPolicyForm(false);
+      // Reset form
+      setPolicyFormData({
+        policyNumber: '',
+        dateWon: new Date().toISOString().split('T')[0],
+        clientName: '',
+        carrier: '',
+        lineOfBusiness: '',
+        newRenewal: 'New',
+        premiumAmount: undefined,
+        payrollAmount: undefined,
+        numberOfEmployees: undefined,
+        adminFeeAmount: undefined,
+        monthlyPremiumAmount: undefined,
+        paymentTiming: undefined,
+        manualExpectedAmount: undefined,
+        notes: ''
+      });
+    } catch (err) {
+      alert(`Could not save policy: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Recon Form Submit
-  const handleReconSubmit = (e: React.FormEvent) => {
+  const handleReconSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reconFormData.policyId || reconFormData.receivedAmount === undefined) {
       alert('Please choose a Policy and enter Received Amount');
       return;
     }
+    if (saving) return;
 
-    const newRecon: ReconciliationStatement = {
+    const policy = policies.find((p) => p.id === reconFormData.policyId);
+    if (!policy) {
+      alert('Selected policy could not be found. Refresh and try again.');
+      return;
+    }
+
+    const draft: ReconciliationStatement = {
       id: `recon-${Date.now()}`,
       statementMonth: reconFormData.statementMonth || new Date().toISOString().substring(0, 7),
       policyId: reconFormData.policyId,
@@ -475,33 +469,53 @@ export default function App() {
       notes: reconFormData.notes?.trim() || ''
     };
 
-    setReconciliations([newRecon, ...reconciliations]);
-    setShowReconForm(false);
-    setReconFormData({
-      statementMonth: new Date().toISOString().substring(0, 7),
-      policyId: '',
-      receivedAmount: undefined,
-      transactionType: 'Payment',
-      notes: ''
-    });
-  };
-
-  const deleteRule = (id: string) => {
-    if (confirm('Delete this carrier rule? All matching policies will fallback to Manual calculation if rule is removed.')) {
-      setRules(rules.filter((r) => r.id !== id));
+    setSaving(true);
+    try {
+      const created = await repo.createReconciliation(draft, policy);
+      setReconciliations([created, ...reconciliations]);
+      setShowReconForm(false);
+      setReconFormData({
+        statementMonth: new Date().toISOString().substring(0, 7),
+        policyId: '',
+        receivedAmount: undefined,
+        transactionType: 'Payment',
+        notes: ''
+      });
+    } catch (err) {
+      alert(`Could not save reconciliation: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const deletePolicy = (id: string) => {
-    if (confirm("Delete this won policy? This will also remove any reconciliation statements tied to this policy number.")) {
+  const deleteRule = async (id: string) => {
+    if (!confirm('Delete this carrier rule? All matching policies will fallback to Manual calculation if rule is removed.')) return;
+    try {
+      await repo.deleteRule(id);
+      setRules(rules.filter((r) => r.id !== id));
+    } catch (err) {
+      alert(`Could not delete rule: ${err instanceof Error ? err.message : err}. Rule edits require an admin (Lamar) account.`);
+    }
+  };
+
+  const deletePolicy = async (id: string) => {
+    if (!confirm("Delete this won policy? This will also remove any reconciliation statements tied to this policy number.")) return;
+    try {
+      await repo.deletePolicy(id);
       setPolicies(policies.filter((p) => p.id !== id));
       setReconciliations(reconciliations.filter((rc) => rc.policyId !== id));
+    } catch (err) {
+      alert(`Could not delete policy: ${err instanceof Error ? err.message : err}`);
     }
   };
 
-  const deleteRecon = (id: string) => {
-    if (confirm('Remove this reconciliation record?')) {
+  const deleteRecon = async (id: string) => {
+    if (!confirm('Remove this reconciliation record?')) return;
+    try {
+      await repo.deleteReconciliation(id);
       setReconciliations(reconciliations.filter((rc) => rc.id !== id));
+    } catch (err) {
+      alert(`Could not delete reconciliation: ${err instanceof Error ? err.message : err}`);
     }
   };
 
@@ -702,32 +716,42 @@ export default function App() {
     setAutoMatchPreview(matchedItems);
   };
 
-  const handleAutoMatchCommit = () => {
+  const handleAutoMatchCommit = async () => {
     const selectedPreviews = autoMatchPreview.filter(p => p.selected && p.matchedPolicy);
     if (selectedPreviews.length === 0) {
       setAutoMatchError('Please select at least one matched deposit to commit.');
       return;
     }
+    if (saving) return;
 
-    const newReconStatements: ReconciliationStatement[] = selectedPreviews.map((p) => {
-      return {
+    const items = selectedPreviews.map((p) => ({
+      stmt: {
         id: `recon-auto-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         statementMonth: autoMatchMonth,
         policyId: p.matchedPolicy!.id,
         receivedAmount: p.depositAmount,
-        transactionType: 'Payment',
+        transactionType: 'Payment' as const,
         notes: `AUTO-MATCHED: Parsed from bank deposit list. Closest fit (difference: $${p.difference.toFixed(2)})`
-      };
-    });
+      },
+      policy: p.matchedPolicy!,
+    }));
 
-    setReconciliations(prev => [...newReconStatements, ...prev]);
-    setAutoMatchSuccess(`Success! Reconciled and recorded ${newReconStatements.length} statements successfully.`);
-    setAutoMatchText('');
-    setAutoMatchPreview([]);
-    setTimeout(() => {
-      setShowAutoMatch(false);
-      setAutoMatchSuccess(null);
-    }, 2500);
+    setSaving(true);
+    try {
+      const created = await repo.createReconciliationsBulk(items);
+      setReconciliations(prev => [...created, ...prev]);
+      setAutoMatchSuccess(`Success! Reconciled and recorded ${created.length} statements successfully.`);
+      setAutoMatchText('');
+      setAutoMatchPreview([]);
+      setTimeout(() => {
+        setShowAutoMatch(false);
+        setAutoMatchSuccess(null);
+      }, 2500);
+    } catch (err) {
+      setAutoMatchError(`Could not commit: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Live expected lookup helper inside policy creation form to help user preview
@@ -811,6 +835,34 @@ export default function App() {
     setTimeout(() => setCopiedCarrier(null), 2000);
   };
 
+  // Data-load states (auth is already handled by <AuthGate> above this component)
+  if (dataLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3 text-slate-500">
+        <RotateCw className="w-7 h-7 animate-spin text-blue-600" />
+        <p className="text-sm font-medium">Loading commission data…</p>
+      </div>
+    );
+  }
+
+  if (dataError) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+        <div className="max-w-md w-full bg-white border border-red-200 rounded-2xl shadow-lg p-8 text-center">
+          <AlertTriangle className="w-8 h-8 text-red-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-slate-900">Couldn't load data</h2>
+          <p className="mt-2 text-sm text-slate-600 break-words">{dataError}</p>
+          <button
+            onClick={loadData}
+            className="mt-5 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg"
+          >
+            <RotateCw className="w-4 h-4" /> Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {/* Top Banner and Brand Navbar */}
@@ -831,25 +883,29 @@ export default function App() {
               </p>
             </div>
 
-            {/* Quick utility controls */}
+            {/* Account + data controls */}
             <div className="flex flex-wrap items-center gap-2">
-              {hasExamples && (
-                <button
-                  onClick={handleClearAllExamples}
-                  className="px-3.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-medium text-xs rounded-lg border border-amber-500/20 transition flex items-center gap-1.5"
-                  title="Clear example rows and placeholders"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Clear Sample Data
-                </button>
+              {email && (
+                <span className="text-[11px] text-slate-400 font-mono px-2 py-1 rounded-md bg-slate-800/60 border border-slate-700">
+                  {email}
+                </span>
               )}
               <button
-                onClick={handleResetToDefault}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg border border-slate-700 transition flex items-center gap-1.5"
-                title="Restore default placeholders for tutorial preview"
+                onClick={loadData}
+                disabled={saving}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-xs rounded-lg border border-slate-700 transition flex items-center gap-1.5"
+                title="Reload live data from Supabase"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                Load Seed Examples
+                Refresh
+              </button>
+              <button
+                onClick={() => signOut()}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg border border-slate-700 transition flex items-center gap-1.5"
+                title="Sign out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Sign out
               </button>
             </div>
           </div>
@@ -2298,16 +2354,6 @@ export default function App() {
                       <>
                         <button
                           type="button"
-                          onClick={handleSyncMasterRules}
-                          className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs rounded-lg shadow-sm transition flex items-center gap-1.5"
-                          id="sync-master-catalog-btn"
-                          title="Instantly import 70+ verified carrier commission rates"
-                        >
-                          <Sparkles className="w-4 h-4 text-amber-200" />
-                          Sync Master Catalog
-                        </button>
-                        <button
-                          type="button"
                           onClick={() => {
                             setShowBulkImport(!showBulkImport);
                             setShowRuleForm(false);
@@ -2979,7 +3025,7 @@ export default function App() {
                           YELLOW Background
                         </span>
                         <span>
-                          <strong>Example Placeholders:</strong> Ideal for tutorials. Overwrite them or click <strong>Clear Sample Data</strong> to activate a clean slate.
+                          <strong>Live data:</strong> Rules, policies, and reconciliations are stored securely in Supabase and shared across the RSG team — changes save instantly.
                         </span>
                       </li>
                     </ul>
