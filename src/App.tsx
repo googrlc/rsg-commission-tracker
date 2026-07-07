@@ -48,6 +48,7 @@ import {
 import { useAuth } from './lib/auth';
 import * as repo from './data/repository';
 import { LogOut, RotateCw } from 'lucide-react';
+import ReconciliationQueue from './components/ReconciliationQueue';
 
 export default function App() {
   const { email, signOut } = useAuth();
@@ -69,7 +70,7 @@ export default function App() {
   const [dataError, setDataError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'guide'>('recon');
+  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide'>('recon');
   const [rulesSubTab, setRulesSubTab] = useState<'rules' | 'schedules'>('rules');
   const [searchQuery, setSearchQuery] = useState('');
   const [reconFilter, setReconFilter] = useState<'All' | 'Shorts' | 'Perfect' | 'Excess'>('All');
@@ -1027,6 +1028,17 @@ export default function App() {
                 }`}
               >
                 3. Reconciliation ({reconciliations.length})
+              </button>
+              <div className="self-center text-slate-300 hidden sm:block">
+                <ArrowRight className="w-3.5 h-3.5" />
+              </div>
+              <button
+                onClick={() => setActiveTab('queue')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  activeTab === 'queue' ? 'bg-slate-900 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
+              >
+                4. Shortage Queue
               </button>
               <div className="self-center text-slate-300 hidden sm:block">
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -2976,6 +2988,9 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {/* Tab: SHORTAGE QUEUE (Phase 3 reconciliation discrepancies) */}
+            {activeTab === 'queue' && <ReconciliationQueue />}
 
             {/* Tab: LEGEND & DETAILED GUIDE */}
             {activeTab === 'guide' && (

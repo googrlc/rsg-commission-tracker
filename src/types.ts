@@ -77,3 +77,24 @@ export interface CarrierSchedule {
   notes?: string;
 }
 
+// A flagged discrepancy from the Hermes reconciliation ingest (Phase 3).
+// Maps to Supabase commission_reconciliation rows that are open and represent
+// an actual variance (short / overpaid / unmatched statement line).
+export interface ReconciliationDiscrepancy {
+  id: string;
+  policyNumber: string;
+  carrierName: string;
+  clientName: string;
+  statementDate: string;
+  expectedCommission?: number;
+  actualCommission?: number;
+  delta?: number;
+  deltaPercent?: number;
+  discrepancyType: string; // 'short' | 'overpaid' | 'unmatched_statement_line'
+  priority: string;        // 'high' | 'medium' | 'low'
+  status: string;          // 'open' | 'resolved'
+  assignedTo?: string;
+  resolutionNotes?: string;
+  amountRecovered?: number;
+}
+

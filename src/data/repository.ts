@@ -8,7 +8,12 @@
  * only by admins (enforced in the DB, surfaced as friendly errors here).
  */
 
-import type { CarrierRule, WonPolicy, ReconciliationStatement } from '../types';
+import type {
+  CarrierRule,
+  WonPolicy,
+  ReconciliationStatement,
+  ReconciliationDiscrepancy,
+} from '../types';
 import { supabase } from '../lib/supabase';
 import {
   ruleRowToRules,
@@ -18,9 +23,11 @@ import {
   policyToLedgerRow,
   reconRowToStatement,
   statementToReconRow,
+  discrepancyRowToModel,
   type RuleRow,
   type LedgerRow,
   type ReconRow,
+  type DiscrepancyRow,
 } from './mappers';
 
 const RULE_COLS =
@@ -183,4 +190,47 @@ export async function deleteReconciliation(id: string): Promise<void> {
     .delete()
     .eq('id', id);
   if (error) fail('Delete reconciliation', error);
+}
+
+// --- Discrepancy queue (Phase 3b) ------------------------------------------
+// Open commission_reconciliation rows that represent an actual variance from
+// the Hermes statement-reconciliation ingest (short / overpaid / unmatched).
+
+const DISCREPANCY_COLS =
+  'id, policy_number, carrier_name, client_name, statement_date, expected_commission, actual_commission, delta, delta_percent, discrepancy_type, priority, status, assigned_to, resolution_notes, amount_recovered';
+
+const DISCREPANCY_TYPES = ['short', 'overpaid', 'unmatched_statement_line'];
+const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+
+export async function fetchDiscrepancies(): Promise<ReconciliationDiscrepancy[]> {
+  const { data, error } = await supabase
+    .from('commission_reconciliation')
+    .select(DISCREPANCY_COLS)
+    .eq('status', 'open')
+    .in('discrepancy_type', DISCREPANCY_TYPES)
+    .order('statement_date', { ascending: false });
+  if (error) fail('Load discrepancy queue', error);
+  const items = (data as DiscrepancyRow[]).map(discrepancyRowToModel);
+  // priority is text, so sort by severity then largest dollar gap in JS.
+  return items.sort(
+    (a, b) =>
+      (PRIORITY_RANK[a.priority] ?? 1) - (PRIORITY_RANK[b.priority] ?? 1) ||
+      Math.abs(b.delta ?? 0) - Math.abs(a.delta ?? 0),
+  );
+}
+
+export async function resolveDiscrepancy(
+  id: string,
+  opts: { amountRecovered?: number; resolutionNotes?: string },
+): Promise<void> {
+  const { error } = await supabase
+    .from('commission_reconciliation')
+    .update({
+      status: 'resolved',
+      resolved_at: new Date().toISOString(),
+      amount_recovered: opts.amountRecovered ?? null,
+      resolution_notes: opts.resolutionNotes?.trim() || null,
+    })
+    .eq('id', id);
+  if (error) fail('Resolve discrepancy', error);
 }
