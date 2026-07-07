@@ -47,14 +47,53 @@ The 6-digit OTP code path works without this.
 
 ## RSG Ops Notes (July 2026)
 
-- **Architecture:** deploys as a **Docker container on RSG's Elestio infra**
-  (same as Onyx, Hermes, EspoCRM). The old Google Cloud Run / AI Studio path is
-  being retired.
+- **Architecture:** LIVE on **Google Cloud Run** at
+  https://rsg-commission-tracker-339396843209.us-east1.run.app
+  (project `pelagic-bison-486600-j0`, project number `339396843209`, region
+  `us-east1`). An earlier note here claimed a migration to Elestio was underway;
+  that never happened — Cloud Run is the real, current home. Scales to zero, ~free
+  for a two-user internal app.
   - `npm run build` → static SPA in `dist/` + bundled server `dist/server.cjs`.
   - `npm start` (`NODE_ENV=production node dist/server.cjs`) serves it on `$PORT`
     (default 3000).
   - `Dockerfile` builds both stages; pass `VITE_SUPABASE_URL` and
     `VITE_SUPABASE_PUBLISHABLE_KEY` as build args.
+
+### Deploy (the working path — do NOT use `gcloud run deploy --source`)
+
+This service was originally created by Google AI Studio, which leaves a
+`run.googleapis.com/sources` annotation on the revision template. That annotation
+makes every `gcloud run deploy --source .` **and** `--image` deploy fail with:
+`Source annotation has sources that are not referenced by a container`.
+The reliable path is: build the image, push it, then apply a service YAML that
+has the annotation stripped.
+
+```bash
+GC=/opt/homebrew/share/google-cloud-sdk/bin/gcloud   # gcloud isn't on the default PATH
+PROJECT=pelagic-bison-486600-j0
+IMG=us-east1-docker.pkg.dev/$PROJECT/cloud-run-source-deploy/rsg-commission-tracker:v$(date +%Y%m%d-%H%M%S)
+
+# 1. Build + push the container
+$GC builds submit --tag "$IMG" --project $PROJECT --region us-east1
+
+# 2. Export current service, strip the poison annotation, point at the new image
+$GC run services describe rsg-commission-tracker --region us-east1 --project $PROJECT --format=export > /tmp/svc.yaml
+python3 - "$IMG" <<'PY'
+import sys,re
+img=sys.argv[1]; s=open('/tmp/svc.yaml').read()
+s='\n'.join(l for l in s.splitlines() if 'run.googleapis.com/sources' not in l)+'\n'
+s=s.replace('image: scratch','image: '+img)          # AI Studio labels the container 'scratch'
+open('/tmp/svc.yaml','w').write(s)
+PY
+
+# 3. Apply
+$GC run services replace /tmp/svc.yaml --region us-east1 --project $PROJECT
+```
+
+One-time setup already done (July 7 2026): created the Artifact Registry repo
+`cloud-run-source-deploy` (us-east1), granted `roles/artifactregistry.writer` to
+the compute + cloudbuild service accounts, enabled `cloudresourcemanager` API,
+ran `gcloud auth configure-docker us-east1-docker.pkg.dev`.
 - **Data spine:** Supabase `rsg-infrastructure` (project `wibscqhkvpijzqbhjphg`).
   - `commission_rules` (216 rows) — rate catalog, also feeds
     `portal_carrier_commissions` → **CarrierHub**.
