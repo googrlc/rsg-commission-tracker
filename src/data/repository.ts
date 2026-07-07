@@ -146,6 +146,29 @@ export async function createPolicy(
   return ledgerRowToPolicy(data as LedgerRow);
 }
 
+export async function updatePolicy(
+  policy: WonPolicy,
+  expectedCommission: number,
+): Promise<WonPolicy> {
+  // Reuse the create mapper but strip fields that must not be clobbered on
+  // rows that came from other sources (Hermes ingest, canonical seed):
+  // statement_source, reconciliation_status, and the NowCerts link.
+  const {
+    statement_source: _src,
+    reconciliation_status: _status,
+    nowcerts_policy_id: _ncid,
+    ...updatable
+  } = policyToLedgerRow(policy, expectedCommission);
+  const { data, error } = await supabase
+    .from('commission_ledger')
+    .update(updatable)
+    .eq('id', policy.id)
+    .select(LEDGER_COLS)
+    .single();
+  if (error) fail('Update policy', error);
+  return ledgerRowToPolicy(data as LedgerRow);
+}
+
 export async function deletePolicy(id: string): Promise<void> {
   // Remove dependent reconciliation lines first, then the ledger row.
   const { error: reconErr } = await supabase

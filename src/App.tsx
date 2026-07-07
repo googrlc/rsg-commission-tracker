@@ -127,6 +127,10 @@ export default function App() {
   });
 
   const [showPolicyForm, setShowPolicyForm] = useState(false);
+  // Ledger row detail panel (slide-over) — edit a policy in place, no side-scrolling.
+  const [detailPolicy, setDetailPolicy] = useState<WonPolicy | null>(null);
+  const [detailForm, setDetailForm] = useState<Partial<WonPolicy>>({});
+  const [detailSaving, setDetailSaving] = useState(false);
   const [policyFormData, setPolicyFormData] = useState<Partial<WonPolicy>>({
     policyNumber: '',
     dateWon: new Date().toISOString().split('T')[0],
@@ -496,6 +500,44 @@ export default function App() {
       setRules(rules.filter((r) => r.id !== id));
     } catch (err) {
       alert(`Could not delete rule: ${err instanceof Error ? err.message : err}. Rule edits require an admin (Lamar) account.`);
+    }
+  };
+
+  const openPolicyDetail = (policy: WonPolicy) => {
+    setDetailPolicy(policy);
+    setDetailForm({ ...policy });
+  };
+
+  const closePolicyDetail = () => {
+    setDetailPolicy(null);
+    setDetailForm({});
+  };
+
+  const savePolicyDetail = async () => {
+    if (!detailPolicy || detailSaving) return;
+    if (!detailForm.policyNumber?.trim() || !detailForm.clientName?.trim() || !detailForm.carrier?.trim()) {
+      alert('Policy #, Client, and Carrier are required.');
+      return;
+    }
+    const draft: WonPolicy = {
+      ...detailPolicy,
+      ...detailForm,
+      policyNumber: detailForm.policyNumber.trim(),
+      clientName: detailForm.clientName.trim(),
+      carrier: detailForm.carrier.trim(),
+      lineOfBusiness: (detailForm.lineOfBusiness ?? '').trim(),
+      notes: detailForm.notes?.trim() || ''
+    };
+    const { expectedAmount } = lookupAndCalculate(draft, rules);
+    setDetailSaving(true);
+    try {
+      const updated = await repo.updatePolicy(draft, expectedAmount);
+      setPolicies(policies.map((p) => (p.id === updated.id ? updated : p)));
+      closePolicyDetail();
+    } catch (err) {
+      alert(`Could not update policy: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setDetailSaving(false);
     }
   };
 
@@ -2294,9 +2336,11 @@ export default function App() {
                           return (
                             <tr
                               key={policy.id}
-                              className={`hover:bg-slate-50 transition border-b border-slate-100 ${
+                              onClick={() => openPolicyDetail(policy)}
+                              title="Click to open details"
+                              className={`hover:bg-slate-50 transition border-b border-slate-100 cursor-pointer ${
                                 isExample ? 'bg-yellow-50/50 hover:bg-yellow-50' : 'bg-white'
-                              }`}
+                              } ${detailPolicy?.id === policy.id ? 'ring-2 ring-inset ring-blue-300' : ''}`}
                             >
                               <td className="p-3.5 pl-6 font-semibold text-slate-800">{policy.policyNumber}</td>
                               <td className="p-3.5 text-slate-500">{policy.dateWon}</td>
@@ -2329,7 +2373,7 @@ export default function App() {
                               </td>
                               <td className="p-3.5 text-center pr-6">
                                 <button
-                                  onClick={() => deletePolicy(policy.id)}
+                                  onClick={(e) => { e.stopPropagation(); deletePolicy(policy.id); }}
                                   className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-rose-600 transition"
                                   title="Delete won policy"
                                 >
@@ -2343,6 +2387,149 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* Policy detail slide-over — work a row in place, no horizontal scrolling */}
+                {detailPolicy && (
+                  <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
+                    <div
+                      className="absolute inset-0 bg-slate-900/40 backdrop-blur-[1px]"
+                      onClick={closePolicyDetail}
+                    />
+                    <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl border-l border-slate-200 flex flex-col animate-in slide-in-from-right duration-200">
+                      <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-start justify-between gap-3">
+                        <div>
+                          <h4 className="font-bold text-slate-900 font-display text-base leading-tight">
+                            {detailForm.clientName || 'Policy Detail'}
+                          </h4>
+                          <p className="text-[11px] font-mono text-slate-500 mt-0.5">
+                            {detailForm.policyNumber} · {detailForm.carrier}
+                          </p>
+                        </div>
+                        <button
+                          onClick={closePolicyDetail}
+                          className="p-1.5 rounded-md hover:bg-slate-200 text-slate-500 text-sm leading-none"
+                          title="Close"
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 text-xs">
+                        {(() => {
+                          const merged = { ...detailPolicy, ...detailForm } as WonPolicy;
+                          const lk = lookupAndCalculate(merged, rules);
+                          return (
+                            <div className={`rounded-lg border p-3 flex items-center justify-between ${lk.ruleFound ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Expected commission</p>
+                                <p className="text-[11px] text-slate-500 mt-0.5">{lk.ruleFound ? lk.method : 'No rule matched — manual'}</p>
+                              </div>
+                              <p className="text-lg font-bold font-mono text-slate-900">{formatCurrencyDecimal(lk.expectedAmount)}</p>
+                            </div>
+                          );
+                        })()}
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Policy #</span>
+                            <input value={detailForm.policyNumber ?? ''} onChange={(e) => setDetailForm({ ...detailForm, policyNumber: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono" />
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Date won / effective</span>
+                            <input type="date" value={detailForm.dateWon ?? ''} onChange={(e) => setDetailForm({ ...detailForm, dateWon: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5" />
+                          </label>
+                        </div>
+
+                        <label className="block">
+                          <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Client</span>
+                          <input value={detailForm.clientName ?? ''} onChange={(e) => setDetailForm({ ...detailForm, clientName: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5" />
+                        </label>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Carrier</span>
+                            <input value={detailForm.carrier ?? ''} onChange={(e) => setDetailForm({ ...detailForm, carrier: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5" />
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Line of business</span>
+                            <input value={detailForm.lineOfBusiness ?? ''} onChange={(e) => setDetailForm({ ...detailForm, lineOfBusiness: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5" />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">New / Renewal</span>
+                            <select value={detailForm.newRenewal ?? 'New'} onChange={(e) => setDetailForm({ ...detailForm, newRenewal: e.target.value as 'New' | 'Renewal' })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 bg-white">
+                              <option value="New">New</option>
+                              <option value="Renewal">Renewal</option>
+                            </select>
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Payment timing</span>
+                            <select value={detailForm.paymentTiming ?? ''} onChange={(e) => setDetailForm({ ...detailForm, paymentTiming: (e.target.value || undefined) as 'As Earned' | 'In Advance' | undefined })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 bg-white">
+                              <option value="">— From rule —</option>
+                              <option value="As Earned">As Earned</option>
+                              <option value="In Advance">In Advance</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Premium ($)</span>
+                            <input type="number" step="0.01" value={detailForm.premiumAmount ?? ''} onChange={(e) => setDetailForm({ ...detailForm, premiumAmount: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Payroll ($)</span>
+                            <input type="number" step="0.01" value={detailForm.payrollAmount ?? ''} onChange={(e) => setDetailForm({ ...detailForm, payrollAmount: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-3">
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500"># Emp</span>
+                            <input type="number" value={detailForm.numberOfEmployees ?? ''} onChange={(e) => setDetailForm({ ...detailForm, numberOfEmployees: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Admin fee ($)</span>
+                            <input type="number" step="0.01" value={detailForm.adminFeeAmount ?? ''} onChange={(e) => setDetailForm({ ...detailForm, adminFeeAmount: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Mo. prem ($)</span>
+                            <input type="number" step="0.01" value={detailForm.monthlyPremiumAmount ?? ''} onChange={(e) => setDetailForm({ ...detailForm, monthlyPremiumAmount: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                          </label>
+                        </div>
+
+                        <label className="block">
+                          <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Manual expected ($) — overrides rulebook</span>
+                          <input type="number" step="0.01" value={detailForm.manualExpectedAmount ?? ''} onChange={(e) => setDetailForm({ ...detailForm, manualExpectedAmount: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                        </label>
+
+                        <label className="block">
+                          <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Notes</span>
+                          <textarea rows={3} value={detailForm.notes ?? ''} onChange={(e) => setDetailForm({ ...detailForm, notes: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5" />
+                        </label>
+                      </div>
+
+                      <div className="px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+                        <button
+                          onClick={() => { const id = detailPolicy.id; closePolicyDetail(); deletePolicy(id); }}
+                          className="px-3 py-2 text-xs font-semibold rounded-lg text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition"
+                        >
+                          Delete
+                        </button>
+                        <div className="flex items-center gap-2">
+                          <button onClick={closePolicyDetail} className="px-4 py-2 text-xs font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition">
+                            Cancel
+                          </button>
+                          <button onClick={savePolicyDetail} disabled={detailSaving} className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-900 hover:bg-slate-800 text-white shadow-sm transition disabled:opacity-50">
+                            {detailSaving ? 'Saving…' : 'Save changes'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
