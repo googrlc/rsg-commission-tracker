@@ -48,6 +48,11 @@ import {
 import { useAuth } from './lib/auth';
 import * as repo from './data/repository';
 import { LogOut, RotateCw } from 'lucide-react';
+import ReconciliationQueue from './components/ReconciliationQueue';
+import StatementBookSummary from './components/StatementBookSummary';
+import CommissionWorkspace from './components/recon/CommissionWorkspace';
+import DashboardPage from './components/recon/DashboardPage';
+import QuickBooksSummaryPage from './components/recon/QuickBooksSummaryPage';
 
 export default function App() {
   const { email, signOut } = useAuth();
@@ -69,7 +74,7 @@ export default function App() {
   const [dataError, setDataError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'guide'>('recon');
+  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide' | 'workspace' | 'dashboard' | 'quickbooks'>('recon');
   const [rulesSubTab, setRulesSubTab] = useState<'rules' | 'schedules'>('rules');
   const [searchQuery, setSearchQuery] = useState('');
   const [reconFilter, setReconFilter] = useState<'All' | 'Shorts' | 'Perfect' | 'Excess'>('All');
@@ -126,6 +131,10 @@ export default function App() {
   });
 
   const [showPolicyForm, setShowPolicyForm] = useState(false);
+  // Ledger row detail panel (slide-over) — edit a policy in place, no side-scrolling.
+  const [detailPolicy, setDetailPolicy] = useState<WonPolicy | null>(null);
+  const [detailForm, setDetailForm] = useState<Partial<WonPolicy>>({});
+  const [detailSaving, setDetailSaving] = useState(false);
   const [policyFormData, setPolicyFormData] = useState<Partial<WonPolicy>>({
     policyNumber: '',
     dateWon: new Date().toISOString().split('T')[0],
@@ -498,6 +507,44 @@ export default function App() {
     }
   };
 
+  const openPolicyDetail = (policy: WonPolicy) => {
+    setDetailPolicy(policy);
+    setDetailForm({ ...policy });
+  };
+
+  const closePolicyDetail = () => {
+    setDetailPolicy(null);
+    setDetailForm({});
+  };
+
+  const savePolicyDetail = async () => {
+    if (!detailPolicy || detailSaving) return;
+    if (!detailForm.policyNumber?.trim() || !detailForm.clientName?.trim() || !detailForm.carrier?.trim()) {
+      alert('Policy #, Client, and Carrier are required.');
+      return;
+    }
+    const draft: WonPolicy = {
+      ...detailPolicy,
+      ...detailForm,
+      policyNumber: detailForm.policyNumber.trim(),
+      clientName: detailForm.clientName.trim(),
+      carrier: detailForm.carrier.trim(),
+      lineOfBusiness: (detailForm.lineOfBusiness ?? '').trim(),
+      notes: detailForm.notes?.trim() || ''
+    };
+    const { expectedAmount } = lookupAndCalculate(draft, rules);
+    setDetailSaving(true);
+    try {
+      const updated = await repo.updatePolicy(draft, expectedAmount);
+      setPolicies(policies.map((p) => (p.id === updated.id ? updated : p)));
+      closePolicyDetail();
+    } catch (err) {
+      alert(`Could not update policy: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setDetailSaving(false);
+    }
+  };
+
   const deletePolicy = async (id: string) => {
     if (!confirm("Delete this won policy? This will also remove any reconciliation statements tied to this policy number.")) return;
     try {
@@ -863,6 +910,41 @@ export default function App() {
     );
   }
 
+  // §11 Commission Workspace (statement reconciliation) — a self-contained shell
+  // over the transaction layer. Entered from the classic view; returns via onExit.
+  if (activeTab === 'workspace') {
+    return (
+      <CommissionWorkspace
+        email={email}
+        signOut={signOut}
+        onExit={() => setActiveTab('recon')}
+      />
+    );
+  }
+
+  // Standalone Commission Dashboard — the §11b analytics as its own page.
+  if (activeTab === 'dashboard') {
+    return (
+      <DashboardPage
+        email={email}
+        signOut={signOut}
+        onExit={() => setActiveTab('recon')}
+        onOpenWorkspace={() => setActiveTab('workspace')}
+      />
+    );
+  }
+
+  // Standalone month-end QuickBooks Summary — close one month at a time.
+  if (activeTab === 'quickbooks') {
+    return (
+      <QuickBooksSummaryPage
+        email={email}
+        signOut={signOut}
+        onExit={() => setActiveTab('recon')}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {/* Top Banner and Brand Navbar */}
@@ -885,6 +967,30 @@ export default function App() {
 
             {/* Account + data controls */}
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition flex items-center gap-1.5"
+                title="Book-wide commission analytics dashboard"
+              >
+                <TrendingUp className="w-3.5 h-3.5" />
+                Dashboard
+              </button>
+              <button
+                onClick={() => setActiveTab('quickbooks')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition flex items-center gap-1.5"
+                title="Month-end QuickBooks summary — close one month at a time"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                Month-End
+              </button>
+              <button
+                onClick={() => setActiveTab('workspace')}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg border border-blue-500 transition flex items-center gap-1.5"
+                title="Statement reconciliation workspace (uploaded carrier statements)"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                Commission Workspace
+              </button>
               {email && (
                 <span className="text-[11px] text-slate-400 font-mono px-2 py-1 rounded-md bg-slate-800/60 border border-slate-700">
                   {email}
@@ -1032,6 +1138,17 @@ export default function App() {
                 <ArrowRight className="w-3.5 h-3.5" />
               </div>
               <button
+                onClick={() => setActiveTab('queue')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  activeTab === 'queue' ? 'bg-slate-900 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
+              >
+                4. Shortage Queue
+              </button>
+              <div className="self-center text-slate-300 hidden sm:block">
+                <ArrowRight className="w-3.5 h-3.5" />
+              </div>
+              <button
                 onClick={() => setActiveTab('guide')}
                 className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition ${
                   activeTab === 'guide' ? 'bg-slate-900 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
@@ -1043,14 +1160,19 @@ export default function App() {
           </div>
         </div>
 
-        {/* Outer Tabs and List Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+        {/* Outer Tabs and List Layout — full-width (QuickBooks summary moved to its
+            own Month-End page; the right sidebar was removed so the ledger uses the
+            whole width). */}
+        <div className="w-full">
           {/* Main Action Workspace area */}
-          <section className="lg:col-span-3 space-y-6">
+          <section className="space-y-6">
             
             {/* Tab: RECONCILIATION */}
             {activeTab === 'recon' && (
               <div className="space-y-6 animate-in fade-in duration-200">
+                {/* Reconciled statement book — real actual money from uploaded
+                    carrier statements (Commission Reconciliation Slice 1). */}
+                <StatementBookSummary />
                 {/* Visual Chart & Cash Timing Bento Panel */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                   {/* Recharts Bar Chart Card (Takes 2 cols on desktop) */}
@@ -2260,8 +2382,6 @@ export default function App() {
                         <th className="p-3.5 font-semibold">Line of Business</th>
                         <th className="p-3.5 font-semibold text-center">New/Renewal</th>
                         <th className="p-3.5 text-right font-semibold">Premium ($)</th>
-                        <th className="p-3.5 text-right font-semibold">Payroll ($)</th>
-                        <th className="p-3.5 text-right font-semibold"># Emp</th>
                         <th className="p-3.5 font-semibold">Method</th>
                         <th className="p-3.5 text-right font-semibold font-mono text-green-700">Expected ($)</th>
                         <th className="p-3.5 pr-6 font-semibold text-center">Delete</th>
@@ -2270,7 +2390,7 @@ export default function App() {
                     <tbody className="divide-y divide-slate-100 font-mono">
                       {policies.length === 0 ? (
                         <tr>
-                          <td colSpan={12} className="p-8 text-center text-slate-400 font-sans">
+                          <td colSpan={10} className="p-8 text-center text-slate-400 font-sans">
                             No active won policies logged. Click "Log New Won Policy" to get started!
                           </td>
                         </tr>
@@ -2282,9 +2402,11 @@ export default function App() {
                           return (
                             <tr
                               key={policy.id}
-                              className={`hover:bg-slate-50 transition border-b border-slate-100 ${
+                              onClick={() => openPolicyDetail(policy)}
+                              title="Click to open details"
+                              className={`hover:bg-slate-50 transition border-b border-slate-100 cursor-pointer ${
                                 isExample ? 'bg-yellow-50/50 hover:bg-yellow-50' : 'bg-white'
-                              }`}
+                              } ${detailPolicy?.id === policy.id ? 'ring-2 ring-inset ring-blue-300' : ''}`}
                             >
                               <td className="p-3.5 pl-6 font-semibold text-slate-800">{policy.policyNumber}</td>
                               <td className="p-3.5 text-slate-500">{policy.dateWon}</td>
@@ -2299,8 +2421,6 @@ export default function App() {
                                 </span>
                               </td>
                               <td className="p-3.5 text-right text-slate-700">{formatCurrency(policy.premiumAmount)}</td>
-                              <td className="p-3.5 text-right text-slate-500">{formatCurrency(policy.payrollAmount)}</td>
-                              <td className="p-3.5 text-right text-slate-500">{policy.numberOfEmployees || '-'}</td>
                               <td className="p-3.5 font-sans">
                                 {lookup.ruleFound ? (
                                   <span className="text-slate-600 font-medium text-[11px]">
@@ -2317,7 +2437,7 @@ export default function App() {
                               </td>
                               <td className="p-3.5 text-center pr-6">
                                 <button
-                                  onClick={() => deletePolicy(policy.id)}
+                                  onClick={(e) => { e.stopPropagation(); deletePolicy(policy.id); }}
                                   className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-rose-600 transition"
                                   title="Delete won policy"
                                 >
@@ -2331,6 +2451,149 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* Policy detail slide-over — work a row in place, no horizontal scrolling */}
+                {detailPolicy && (
+                  <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
+                    <div
+                      className="absolute inset-0 bg-slate-900/40 backdrop-blur-[1px]"
+                      onClick={closePolicyDetail}
+                    />
+                    <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl border-l border-slate-200 flex flex-col animate-in slide-in-from-right duration-200">
+                      <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-start justify-between gap-3">
+                        <div>
+                          <h4 className="font-bold text-slate-900 font-display text-base leading-tight">
+                            {detailForm.clientName || 'Policy Detail'}
+                          </h4>
+                          <p className="text-[11px] font-mono text-slate-500 mt-0.5">
+                            {detailForm.policyNumber} · {detailForm.carrier}
+                          </p>
+                        </div>
+                        <button
+                          onClick={closePolicyDetail}
+                          className="p-1.5 rounded-md hover:bg-slate-200 text-slate-500 text-sm leading-none"
+                          title="Close"
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 text-xs">
+                        {(() => {
+                          const merged = { ...detailPolicy, ...detailForm } as WonPolicy;
+                          const lk = lookupAndCalculate(merged, rules);
+                          return (
+                            <div className={`rounded-lg border p-3 flex items-center justify-between ${lk.ruleFound ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Expected commission</p>
+                                <p className="text-[11px] text-slate-500 mt-0.5">{lk.ruleFound ? lk.method : 'No rule matched — manual'}</p>
+                              </div>
+                              <p className="text-lg font-bold font-mono text-slate-900">{formatCurrencyDecimal(lk.expectedAmount)}</p>
+                            </div>
+                          );
+                        })()}
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Policy #</span>
+                            <input value={detailForm.policyNumber ?? ''} onChange={(e) => setDetailForm({ ...detailForm, policyNumber: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono" />
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Date won / effective</span>
+                            <input type="date" value={detailForm.dateWon ?? ''} onChange={(e) => setDetailForm({ ...detailForm, dateWon: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5" />
+                          </label>
+                        </div>
+
+                        <label className="block">
+                          <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Client</span>
+                          <input value={detailForm.clientName ?? ''} onChange={(e) => setDetailForm({ ...detailForm, clientName: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5" />
+                        </label>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Carrier</span>
+                            <input value={detailForm.carrier ?? ''} onChange={(e) => setDetailForm({ ...detailForm, carrier: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5" />
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Line of business</span>
+                            <input value={detailForm.lineOfBusiness ?? ''} onChange={(e) => setDetailForm({ ...detailForm, lineOfBusiness: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5" />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">New / Renewal</span>
+                            <select value={detailForm.newRenewal ?? 'New'} onChange={(e) => setDetailForm({ ...detailForm, newRenewal: e.target.value as 'New' | 'Renewal' })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 bg-white">
+                              <option value="New">New</option>
+                              <option value="Renewal">Renewal</option>
+                            </select>
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Payment timing</span>
+                            <select value={detailForm.paymentTiming ?? ''} onChange={(e) => setDetailForm({ ...detailForm, paymentTiming: (e.target.value || undefined) as 'As Earned' | 'In Advance' | undefined })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 bg-white">
+                              <option value="">— From rule —</option>
+                              <option value="As Earned">As Earned</option>
+                              <option value="In Advance">In Advance</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Premium ($)</span>
+                            <input type="number" step="0.01" value={detailForm.premiumAmount ?? ''} onChange={(e) => setDetailForm({ ...detailForm, premiumAmount: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Payroll ($)</span>
+                            <input type="number" step="0.01" value={detailForm.payrollAmount ?? ''} onChange={(e) => setDetailForm({ ...detailForm, payrollAmount: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-3">
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500"># Emp</span>
+                            <input type="number" value={detailForm.numberOfEmployees ?? ''} onChange={(e) => setDetailForm({ ...detailForm, numberOfEmployees: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Admin fee ($)</span>
+                            <input type="number" step="0.01" value={detailForm.adminFeeAmount ?? ''} onChange={(e) => setDetailForm({ ...detailForm, adminFeeAmount: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Mo. prem ($)</span>
+                            <input type="number" step="0.01" value={detailForm.monthlyPremiumAmount ?? ''} onChange={(e) => setDetailForm({ ...detailForm, monthlyPremiumAmount: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                          </label>
+                        </div>
+
+                        <label className="block">
+                          <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Manual expected ($) — overrides rulebook</span>
+                          <input type="number" step="0.01" value={detailForm.manualExpectedAmount ?? ''} onChange={(e) => setDetailForm({ ...detailForm, manualExpectedAmount: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                        </label>
+
+                        <label className="block">
+                          <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Notes</span>
+                          <textarea rows={3} value={detailForm.notes ?? ''} onChange={(e) => setDetailForm({ ...detailForm, notes: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5" />
+                        </label>
+                      </div>
+
+                      <div className="px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+                        <button
+                          onClick={() => { const id = detailPolicy.id; closePolicyDetail(); deletePolicy(id); }}
+                          className="px-3 py-2 text-xs font-semibold rounded-lg text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition"
+                        >
+                          Delete
+                        </button>
+                        <div className="flex items-center gap-2">
+                          <button onClick={closePolicyDetail} className="px-4 py-2 text-xs font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition">
+                            Cancel
+                          </button>
+                          <button onClick={savePolicyDetail} disabled={detailSaving} className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-900 hover:bg-slate-800 text-white shadow-sm transition disabled:opacity-50">
+                            {detailSaving ? 'Saving…' : 'Save changes'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2977,6 +3240,9 @@ export default function App() {
               </div>
             )}
 
+            {/* Tab: SHORTAGE QUEUE (Phase 3 reconciliation discrepancies) */}
+            {activeTab === 'queue' && <ReconciliationQueue />}
+
             {/* Tab: LEGEND & DETAILED GUIDE */}
             {activeTab === 'guide' && (
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden p-6 space-y-6">
@@ -3074,120 +3340,6 @@ export default function App() {
             )}
           </section>
 
-          {/* Right Sidebar Widget Panel: QuickBooks group ledger */}
-          <aside className="lg:col-span-1 space-y-6">
-            
-            {/* QuickBooks summary Card */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <BookOpen className="w-4 h-4 text-emerald-400" />
-                  <h3 className="font-semibold text-xs font-mono uppercase tracking-wider">
-                    QuickBooks Summary
-                  </h3>
-                </div>
-                <span className="text-[10px] font-mono text-slate-400">BY CARRIER</span>
-              </div>
-
-              {/* Little info alert */}
-              <div className="p-4 bg-blue-50 border-b border-slate-100 flex gap-2 text-[11px] text-blue-800 leading-normal">
-                <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
-                <p>
-                  Record the resolved <strong>Received</strong> totals as Commission Income in QB by carrier. Use the details below.
-                </p>
-              </div>
-
-              {/* Carrier Ledger details */}
-              <div className="divide-y divide-slate-100 p-2.5">
-                {carrierSummaries.length === 0 ? (
-                  <p className="p-4 text-center text-xs text-slate-400">
-                    No active carriers to group. Match won policies first!
-                  </p>
-                ) : (
-                  carrierSummaries.map((summary) => (
-                    <div
-                      key={summary.carrier}
-                      className="p-3 hover:bg-slate-50 rounded-lg transition flex flex-col gap-1.5"
-                    >
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-xs text-slate-800 tracking-tight block truncate max-w-[120px]">
-                          {summary.carrier}
-                        </span>
-                        <button
-                          onClick={() => copyCarrierToClipboard(summary)}
-                          className="px-1.5 py-1 text-[10px] text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded border border-slate-200 flex items-center gap-1 transition"
-                          title="Copy details to clipboard"
-                        >
-                          {copiedCarrier === summary.carrier ? (
-                            <>
-                              <Check className="w-3 h-3 text-emerald-500" />
-                              Copied!
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3 h-3" />
-                              Copy
-                            </>
-                          )}
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-1 text-[11px] font-mono">
-                        <div>
-                          <span className="block text-slate-400 text-[9px] uppercase">Expected</span>
-                          <span className="text-slate-700 font-semibold">{formatCurrency(summary.expected)}</span>
-                        </div>
-                        <div>
-                          <span className="block text-slate-400 text-[9px] uppercase">Received</span>
-                          <span className="text-emerald-600 font-bold">{formatCurrency(summary.received)}</span>
-                        </div>
-                        <div>
-                          <span className="block text-slate-400 text-[9px] uppercase">Short</span>
-                          <span className={`font-bold ${summary.short > 0 ? 'text-amber-500' : 'text-slate-400'}`}>
-                            {formatCurrency(summary.short)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* QuickBooks guidelines footer */}
-              <div className="p-3 bg-slate-50 border-t border-slate-100 text-[10px] text-slate-400 text-center font-mono">
-                Risk Solutions Group • Audit Ledger
-              </div>
-            </div>
-
-            {/* Quick Tips & Workflow guidelines card */}
-            <div className="bg-slate-900 text-white rounded-xl shadow-sm border border-slate-800 p-5 space-y-3.5">
-              <h4 className="text-xs font-bold font-mono text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-yellow-400 animate-pulse" />
-                Lamar's Quick Tips
-              </h4>
-              <ul className="text-xs space-y-2.5 text-slate-300">
-                <li className="flex gap-2">
-                  <span className="text-blue-400 font-bold">•</span>
-                  <span>
-                    <strong>Top 5 Focus</strong>: Spend ~15 minutes logging just your top 5 carriers. This solves 80% of your mismatch pains from day one.
-                  </span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="text-blue-400 font-bold">•</span>
-                  <span>
-                    <strong>Rule Names</strong>: Spell Carrier or LoB identically in the Rules and Won Policies tabs! The lookups are case-insensitive, but match exact text.
-                  </span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="text-blue-400 font-bold">•</span>
-                  <span>
-                    <strong>Manual Override</strong>: If a carriers rule varies dynamically, choose <strong>Manual</strong> Commission Method so you can type Expected manually on each policy row.
-                  </span>
-                </li>
-              </ul>
-            </div>
-
-          </aside>
         </div>
       </main>
     </div>

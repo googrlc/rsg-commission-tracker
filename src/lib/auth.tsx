@@ -11,7 +11,7 @@ import React, {
   useCallback,
 } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { Lock, Mail, ShieldAlert, Loader2, LogOut } from 'lucide-react';
+import { Lock, Mail, KeyRound, ShieldAlert, Loader2, LogOut } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './supabase';
 
 interface AuthState {
@@ -107,14 +107,37 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function LoginScreen() {
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [phase, setPhase] = useState<'enter' | 'sent'>('enter');
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  const sendLink = async (e: React.FormEvent) => {
+  // Primary path: email + password. No email is sent, so it can't be throttled
+  // by the auth mailer's rate limit. On success the auth listener flips the app
+  // into the authenticated view.
+  const signInPassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+    setInfo(null);
+    if (!email.trim() || !password) {
+      setError('Enter your work email and password.');
+      return;
+    }
+    setBusy(true);
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
+    setBusy(false);
+    if (error) setError(error.message);
+  };
+
+  // Fallback path: email a magic link / 6-digit code (subject to the mailer
+  // rate limit — kept as a backup for password resets or new devices).
+  const sendLink = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setError(null);
     setInfo(null);
     if (!email.trim()) {
@@ -173,7 +196,7 @@ function LoginScreen() {
       </div>
 
       {phase === 'enter' ? (
-        <form onSubmit={sendLink} className="space-y-4">
+        <form onSubmit={signInPassword} className="space-y-4">
           <label className="block">
             <span className="text-xs font-semibold text-slate-600">Work email</span>
             <div className="mt-1 flex items-center gap-2 border border-slate-300 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500">
@@ -184,6 +207,21 @@ function LoginScreen() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@risksolutionsgroup.net"
+                autoComplete="username"
+                className="flex-1 outline-none text-sm text-slate-900"
+              />
+            </div>
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-600">Password</span>
+            <div className="mt-1 flex items-center gap-2 border border-slate-300 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500">
+              <KeyRound className="w-4 h-4 text-slate-400" />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                autoComplete="current-password"
                 className="flex-1 outline-none text-sm text-slate-900"
               />
             </div>
@@ -194,7 +232,15 @@ function LoginScreen() {
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold text-sm rounded-lg py-2.5 flex items-center justify-center gap-2 transition"
           >
             {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-            Send login link
+            Sign in
+          </button>
+          <button
+            type="button"
+            onClick={() => sendLink()}
+            disabled={busy}
+            className="w-full text-xs text-slate-500 hover:text-slate-700"
+          >
+            Email me a login link instead
           </button>
         </form>
       ) : (

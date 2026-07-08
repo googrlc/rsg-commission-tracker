@@ -23,6 +23,7 @@ import type {
   CarrierRule,
   WonPolicy,
   ReconciliationStatement,
+  ReconciliationDiscrepancy,
   CommissionMethod,
 } from '../types';
 
@@ -237,6 +238,49 @@ export function reconRowToStatement(row: ReconRow): ReconciliationStatement {
  * Build a reconciliation insert payload. Needs the linked policy to fill the
  * NOT NULL denormalized columns (policy_number/carrier_name/client_name).
  */
+// --- commission_reconciliation (discrepancy queue, Phase 3) ----------------
+
+export interface DiscrepancyRow {
+  id: string;
+  policy_number: string;
+  carrier_name: string;
+  client_name: string;
+  statement_date: string;
+  expected_commission: number | null;
+  actual_commission: number | null;
+  delta: number | null;
+  delta_percent: number | null;
+  discrepancy_type: string | null;
+  priority: string | null;
+  status: string | null;
+  assigned_to: string | null;
+  resolution_notes: string | null;
+  amount_recovered: number | null;
+}
+
+const _num = (v: number | null): number | undefined =>
+  v == null ? undefined : Number(v);
+
+export function discrepancyRowToModel(row: DiscrepancyRow): ReconciliationDiscrepancy {
+  return {
+    id: row.id,
+    policyNumber: row.policy_number,
+    carrierName: row.carrier_name,
+    clientName: row.client_name,
+    statementDate: row.statement_date,
+    expectedCommission: _num(row.expected_commission),
+    actualCommission: _num(row.actual_commission),
+    delta: _num(row.delta),
+    deltaPercent: _num(row.delta_percent),
+    discrepancyType: row.discrepancy_type ?? 'unknown',
+    priority: row.priority ?? 'medium',
+    status: row.status ?? 'open',
+    assignedTo: row.assigned_to ?? undefined,
+    resolutionNotes: row.resolution_notes ?? undefined,
+    amountRecovered: _num(row.amount_recovered),
+  };
+}
+
 export function statementToReconRow(
   stmt: ReconciliationStatement,
   policy: WonPolicy,

@@ -2,5 +2,5 @@
   "name": "RSG Commission Tracker",
   "description": "Get your commission rates out of your head, calculate expected commissions on won policies, and reconcile payments to catch carrier shorts before feeding QuickBooks.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }

@@ -8,7 +8,13 @@
  * only by admins (enforced in the DB, surfaced as friendly errors here).
  */
 
-import type { CarrierRule, WonPolicy, ReconciliationStatement } from '../types';
+import type {
+  CarrierRule,
+  WonPolicy,
+  ReconciliationStatement,
+  ReconciliationDiscrepancy,
+  BookSummary,
+} from '../types';
 import { supabase } from '../lib/supabase';
 import {
   ruleRowToRules,
@@ -18,9 +24,11 @@ import {
   policyToLedgerRow,
   reconRowToStatement,
   statementToReconRow,
+  discrepancyRowToModel,
   type RuleRow,
   type LedgerRow,
   type ReconRow,
+  type DiscrepancyRow,
 } from './mappers';
 
 const RULE_COLS =
@@ -139,6 +147,29 @@ export async function createPolicy(
   return ledgerRowToPolicy(data as LedgerRow);
 }
 
+export async function updatePolicy(
+  policy: WonPolicy,
+  expectedCommission: number,
+): Promise<WonPolicy> {
+  // Reuse the create mapper but strip fields that must not be clobbered on
+  // rows that came from other sources (Hermes ingest, canonical seed):
+  // statement_source, reconciliation_status, and the NowCerts link.
+  const {
+    statement_source: _src,
+    reconciliation_status: _status,
+    nowcerts_policy_id: _ncid,
+    ...updatable
+  } = policyToLedgerRow(policy, expectedCommission);
+  const { data, error } = await supabase
+    .from('commission_ledger')
+    .update(updatable)
+    .eq('id', policy.id)
+    .select(LEDGER_COLS)
+    .single();
+  if (error) fail('Update policy', error);
+  return ledgerRowToPolicy(data as LedgerRow);
+}
+
 export async function deletePolicy(id: string): Promise<void> {
   // Remove dependent reconciliation lines first, then the ledger row.
   const { error: reconErr } = await supabase
@@ -183,4 +214,74 @@ export async function deleteReconciliation(id: string): Promise<void> {
     .delete()
     .eq('id', id);
   if (error) fail('Delete reconciliation', error);
+}
+
+// --- Discrepancy queue (Phase 3b) ------------------------------------------
+// Open commission_reconciliation rows that represent an actual variance from
+// the Hermes statement-reconciliation ingest (short / overpaid / unmatched).
+
+const DISCREPANCY_COLS =
+  'id, policy_number, carrier_name, client_name, statement_date, expected_commission, actual_commission, delta, delta_percent, discrepancy_type, priority, status, assigned_to, resolution_notes, amount_recovered';
+
+const DISCREPANCY_TYPES = ['short', 'overpaid', 'unmatched_statement_line'];
+const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+
+export async function fetchDiscrepancies(): Promise<ReconciliationDiscrepancy[]> {
+  const { data, error } = await supabase
+    .from('commission_reconciliation')
+    .select(DISCREPANCY_COLS)
+    .eq('status', 'open')
+    .in('discrepancy_type', DISCREPANCY_TYPES)
+    .order('statement_date', { ascending: false });
+  if (error) fail('Load discrepancy queue', error);
+  const items = (data as DiscrepancyRow[]).map(discrepancyRowToModel);
+  // priority is text, so sort by severity then largest dollar gap in JS.
+  return items.sort(
+    (a, b) =>
+      (PRIORITY_RANK[a.priority] ?? 1) - (PRIORITY_RANK[b.priority] ?? 1) ||
+      Math.abs(b.delta ?? 0) - Math.abs(a.delta ?? 0),
+  );
+}
+
+// --- Statement transaction layer (Commission Reconciliation, Slice 1) ---------
+// Read the book-wide rollup from v_book_summary. This is the ACTUAL side — real
+// money reconciled from uploaded carrier statements — as opposed to the projected
+// expected figures the rest of this app computes from the rulebook.
+
+export async function fetchBookSummary(): Promise<BookSummary | null> {
+  const { data, error } = await supabase
+    .from('v_book_summary')
+    .select(
+      'txn_count, carrier_count, policy_count, net_written_premium, total_commission, fee_drag, net_due, effective_comm_pct',
+    )
+    .maybeSingle();
+  if (error) fail('Load book summary', error);
+  if (!data) return null;
+  const row = data as Record<string, number | null>;
+  return {
+    txnCount: row.txn_count ?? 0,
+    carrierCount: row.carrier_count ?? 0,
+    policyCount: row.policy_count ?? 0,
+    netWrittenPremium: row.net_written_premium ?? 0,
+    totalCommission: row.total_commission ?? 0,
+    feeDrag: row.fee_drag ?? 0,
+    netDue: row.net_due ?? 0,
+    effectiveCommPct: row.effective_comm_pct ?? 0,
+  };
+}
+
+export async function resolveDiscrepancy(
+  id: string,
+  opts: { amountRecovered?: number; resolutionNotes?: string },
+): Promise<void> {
+  const { error } = await supabase
+    .from('commission_reconciliation')
+    .update({
+      status: 'resolved',
+      resolved_at: new Date().toISOString(),
+      amount_recovered: opts.amountRecovered ?? null,
+      resolution_notes: opts.resolutionNotes?.trim() || null,
+    })
+    .eq('id', id);
+  if (error) fail('Resolve discrepancy', error);
 }
