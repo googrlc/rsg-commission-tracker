@@ -1,0 +1,25 @@
+# Cloud Build config for the Cloud Run deploy (see README deploy runbook).
+# The README's `gcloud builds submit --tag` shorthand does NOT pass build args,
+# but the Dockerfile bakes the browser-safe Supabase URL + PUBLISHABLE key at
+# build time (ARG/ENV -> vite loadEnv). Without them the SPA ships with empty
+# config. This config passes them. Values come from --substitutions at submit time
+# (both are browser-safe / already shipped in the client bundle; NOT the service key).
+#
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --substitutions=_IMAGE=<img>,_SUPA_URL=<url>,_SUPA_KEY=<publishable_key> \
+#     --project pelagic-bison-486600-j0 --region us-east1
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'VITE_SUPABASE_URL=${_SUPA_URL}'
+      - '--build-arg'
+      - 'VITE_SUPABASE_PUBLISHABLE_KEY=${_SUPA_KEY}'
+      - '-t'
+      - '${_IMAGE}'
+      - '.'
+images:
+  - '${_IMAGE}'
+options:
+  logging: CLOUD_LOGGING_ONLY
