@@ -99,7 +99,8 @@ ran `gcloud auth configure-docker us-east1-docker.pkg.dev`.
     `portal_carrier_commissions` → **CarrierHub**.
   - `commission_ledger` — won policies / expected commission (WonPolicy).
   - `commission_reconciliation` — payment + discrepancy log.
-- **Onyx** (appetite knowledge base): https://onyx-1t6jv-u69864.vm.elestio.app
+- **File archive:** carrier statements + rate sheets are archived to **Nextcloud**
+  (see the commission-inbox module); `commission_statements.archive_url` stores the path.
 - **Never** commit real keys. Publishable key + URL only; service key stays in
   1Password (`rsg_infrastructure`).
 - **Phase 2+ (not built):** NowCerts→ledger nightly ingest is **blocked** until

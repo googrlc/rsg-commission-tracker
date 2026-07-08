@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Minimal Express server that serves the built SPA in production and proxies
- * to Vite's dev middleware in development. Mirrors the rsg-carrierhub pattern so
- * both apps deploy the same way as Docker containers on RSG's Elestio infra
- * (replacing the retired Cloud Run path). No server-side AI/API routes — the
- * tracker talks only to Supabase from the browser.
+ * to Vite's dev middleware in development. Packaged as a Docker container and
+ * deployed to Google Cloud Run (see README deploy runbook). No server-side
+ * AI/API routes — the tracker talks only to Supabase from the browser.
  */
 
 import express from 'express';
@@ -17,7 +16,7 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
-  // Health check for the container orchestrator / Elestio.
+  // Health check for Cloud Run.
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
