@@ -37,20 +37,22 @@ export default function ReconciliationWorkspace({
   const [bucket, setBucket] = useState<Bucket>(null);
   const [carrier, setCarrier] = useState('All');
   const [search, setSearch] = useState('');
+  const [month, setMonth] = useState<number | 'all'>('all');
   const [churnBy, setChurnBy] = useState<'client' | 'carrier'>('client');
 
   const [selected, setSelected] = useState<ReconException | null>(null);
   const [txns, setTxns] = useState<CommissionTxn[] | null>(null);
+  const [policyMonths, setPolicyMonths] = useState<Array<{ policyNumber: string; monthKey: number }>>([]);
 
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const [s, ex, lc] = await Promise.all([
-          recon.fetchReconSummary(), recon.fetchReconExceptions(), recon.fetchLossOnCancel(),
+        const [s, ex, lc, pm] = await Promise.all([
+          recon.fetchReconSummary(), recon.fetchReconExceptions(), recon.fetchLossOnCancel(), recon.fetchPolicyMonths(),
         ]);
         if (!active) return;
-        setSummary(s); setRows(ex); setLoss(lc);
+        setSummary(s); setRows(ex); setLoss(lc); setPolicyMonths(pm);
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'Failed to load.');
       } finally {
@@ -65,12 +67,31 @@ export default function ReconciliationWorkspace({
     [rows],
   );
 
+  // Statement-activity months present, newest first, + policy→months lookup so the
+  // queue can be worked one month at a time (spec: reconcile month by month).
+  const monthsAvailable = useMemo<number[]>(() => {
+    const seen = new Set<number>();
+    const out: number[] = [];
+    for (const p of policyMonths) if (!seen.has(p.monthKey)) { seen.add(p.monthKey); out.push(p.monthKey); }
+    return out.sort((a, b) => b - a);
+  }, [policyMonths]);
+
+  const policyToMonths = useMemo(() => {
+    const m = new Map<string, Set<number>>();
+    for (const p of policyMonths) {
+      if (!m.has(p.policyNumber)) m.set(p.policyNumber, new Set());
+      m.get(p.policyNumber)!.add(p.monthKey);
+    }
+    return m;
+  }, [policyMonths]);
+
   const filtered = useMemo(() => {
     const allow = bucket ? new Set(BUCKET_STATUSES[bucket]) : null;
     const q = search.trim().toLowerCase();
     return rows
       .filter((r) => (!allow || allow.has(r.reconciliationStatus)))
       .filter((r) => (carrier === 'All' || r.carrierName === carrier))
+      .filter((r) => month === 'all' || (r.policyNumber != null && policyToMonths.get(r.policyNumber)?.has(month)))
       .filter((r) => !q || (r.clientName ?? '').toLowerCase().includes(q) || (r.policyNumber ?? '').toLowerCase().includes(q))
       // shorts first: most-negative delta on top, null deltas last
       .sort((a, b) => {
@@ -80,7 +101,7 @@ export default function ReconciliationWorkspace({
         if (db == null) return -1;
         return da - db;
       });
-  }, [rows, bucket, carrier, search]);
+  }, [rows, bucket, carrier, search, month, policyToMonths]);
 
   const openPolicy = async (r: ReconException) => {
     setSelected(r); setTxns(null);
@@ -143,7 +164,7 @@ export default function ReconciliationWorkspace({
       {/* Exception queue */}
       <Card
         title="Exception queue"
-        subtitle={`${filtered.length} rows${bucket ? ' · filtered' : ''} · shorts on top (red = chase it, amber = fix the rule)`}
+        subtitle={`${filtered.length} rows${bucket ? ' · filtered' : ''}${month !== 'all' ? ` · ${monthLabel(month)}` : ''} · shorts on top (red = chase it, amber = fix the rule)`}
         right={
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 border border-slate-300 rounded-lg px-2 py-1">
@@ -151,7 +172,14 @@ export default function ReconciliationWorkspace({
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="client / policy"
                 className="text-xs outline-none w-28" />
             </div>
+            <select value={month} onChange={(e) => setMonth(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+              title="Reconcile one month at a time (statement activity)"
+              className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
+              <option value="all">All months</option>
+              {monthsAvailable.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+            </select>
             <select value={carrier} onChange={(e) => setCarrier(e.target.value)}
+              title="Filter by carrier"
               className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
               {carriers.map((c) => <option key={c}>{c}</option>)}
             </select>
@@ -162,13 +190,14 @@ export default function ReconciliationWorkspace({
         }
       >
         <div className="overflow-x-auto -mx-2">
-          <table className="w-full text-xs min-w-[980px]">
+          <table className="w-full text-xs min-w-[1080px]">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
                 <th className="text-left font-medium py-2 px-2">Client</th>
                 <th className="text-left font-medium px-2">Carrier</th>
                 <th className="text-left font-medium px-2">Policy #</th>
                 <th className="text-left font-medium px-2">LOB</th>
+                <th className="text-left font-medium px-2">Type</th>
                 <th className="text-left font-medium px-2">Effective</th>
                 <th className="text-left font-medium px-2">Expiration</th>
                 <th className="text-left font-medium px-2">Exp. pay</th>
@@ -181,7 +210,7 @@ export default function ReconciliationWorkspace({
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={12} className="text-center text-slate-400 py-6">No rows for this filter.</td></tr>
+                <tr><td colSpan={13} className="text-center text-slate-400 py-6">No rows for this filter.</td></tr>
               )}
               {filtered.map((r, i) => (
                 <tr key={`${r.carrierName}-${r.policyNumber}-${i}`}
@@ -191,6 +220,7 @@ export default function ReconciliationWorkspace({
                   <td className="px-2 text-slate-600">{r.carrierName}</td>
                   <td className="px-2 font-mono text-slate-500">{r.policyNumber ?? '—'}</td>
                   <td className="px-2 text-slate-500">{r.lob ?? '—'}</td>
+                  <td className="px-2 whitespace-nowrap"><TypeCell r={r} /></td>
                   <td className="px-2 font-mono text-slate-500">{r.effectiveDate ?? '—'}</td>
                   <td className="px-2 font-mono text-slate-500">
                     {r.expirationDate ?? '—'}
@@ -228,6 +258,31 @@ export default function ReconciliationWorkspace({
         <PolicySlideOver row={selected} txns={txns} onClose={() => { setSelected(null); setTxns(null); }} />
       )}
     </div>
+  );
+}
+
+/** New / Renewal term badge + endorsement/cancel line counts, so each recon row
+ * shows how its commission is typed (spec: NB vs renewal vs endorsement). */
+function TypeCell({ r }: { r: ReconException }) {
+  const extras: string[] = [];
+  if (!r.termType) {
+    // unmatched-statement rows have no ledger term — show the raw line mix.
+    if (r.newCount > 0) extras.push(`${r.newCount} new`);
+    if (r.renewalCount > 0) extras.push(`${r.renewalCount} rnwl`);
+  }
+  if (r.endorsementCount > 0) extras.push(`${r.endorsementCount} endt`);
+  if (r.cancelCount > 0) extras.push(`${r.cancelCount} cxl`);
+  return (
+    <span className="inline-flex items-center gap-1">
+      {r.termType && (
+        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+          r.termType === 'New' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+          {r.termType}
+        </span>
+      )}
+      {extras.length > 0 && <span className="text-[10px] text-slate-400">{extras.join(' · ')}</span>}
+      {!r.termType && extras.length === 0 && <span className="text-slate-300">—</span>}
+    </span>
   );
 }
 

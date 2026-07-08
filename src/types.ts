@@ -135,6 +135,13 @@ export interface ReconException {
   termMonths: number | null;
   expectedPayMonth: number | null; // YYYYMM
   payBasis: string | null;         // human-readable, derived from carrier payment_model
+  // Commission typing: the term (New/Renewal) + a breakdown of the policy's line
+  // types so New vs Renewal vs Endorsement vs Cancel is visible on the recon sheet.
+  termType: 'New' | 'Renewal' | null;
+  newCount: number;
+  renewalCount: number;
+  endorsementCount: number;
+  cancelCount: number;
 }
 
 /** One commission_transactions row (policy detail slide-over). */
@@ -172,6 +179,23 @@ export interface NbVsRenewalRow { business_type: string; term_count: number; wri
 export interface SegmentRow { segment: string | null; term_count: number; avg_premium: number; written_premium: number; }
 export interface MonthlyTrendRow { month_key: number; txn_count: number; net_premium: number; commission: number; fees: number; }
 export interface FeeDragRow { carrier_name: string; fee_type: string; fee_count: number; fee_total: number; }
+
+/** v_commission_by_carrier_month — per-carrier, per-month rollup for the month-end
+ * QuickBooks page. month_key is the statement activity month (YYYYMM). */
+export interface CarrierMonthRow {
+  month_key: number;
+  carrier_name: string;
+  txn_count: number;
+  policy_count: number;
+  premium: number;
+  commission: number;
+  fees: number;
+  net_due: number;
+  new_count: number;
+  renewal_count: number;
+  endorsement_count: number;
+  cancel_count: number;
+}
 
 /** carrier_commission_profile (§11d). */
 export interface CarrierProfile {

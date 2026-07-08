@@ -52,6 +52,7 @@ import ReconciliationQueue from './components/ReconciliationQueue';
 import StatementBookSummary from './components/StatementBookSummary';
 import CommissionWorkspace from './components/recon/CommissionWorkspace';
 import DashboardPage from './components/recon/DashboardPage';
+import QuickBooksSummaryPage from './components/recon/QuickBooksSummaryPage';
 
 export default function App() {
   const { email, signOut } = useAuth();
@@ -73,7 +74,7 @@ export default function App() {
   const [dataError, setDataError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide' | 'workspace' | 'dashboard'>('recon');
+  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide' | 'workspace' | 'dashboard' | 'quickbooks'>('recon');
   const [rulesSubTab, setRulesSubTab] = useState<'rules' | 'schedules'>('rules');
   const [searchQuery, setSearchQuery] = useState('');
   const [reconFilter, setReconFilter] = useState<'All' | 'Shorts' | 'Perfect' | 'Excess'>('All');
@@ -933,6 +934,17 @@ export default function App() {
     );
   }
 
+  // Standalone month-end QuickBooks Summary — close one month at a time.
+  if (activeTab === 'quickbooks') {
+    return (
+      <QuickBooksSummaryPage
+        email={email}
+        signOut={signOut}
+        onExit={() => setActiveTab('recon')}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {/* Top Banner and Brand Navbar */}
@@ -962,6 +974,14 @@ export default function App() {
               >
                 <TrendingUp className="w-3.5 h-3.5" />
                 Dashboard
+              </button>
+              <button
+                onClick={() => setActiveTab('quickbooks')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition flex items-center gap-1.5"
+                title="Month-end QuickBooks summary — close one month at a time"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                Month-End
               </button>
               <button
                 onClick={() => setActiveTab('workspace')}
@@ -1140,10 +1160,12 @@ export default function App() {
           </div>
         </div>
 
-        {/* Outer Tabs and List Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+        {/* Outer Tabs and List Layout — full-width (QuickBooks summary moved to its
+            own Month-End page; the right sidebar was removed so the ledger uses the
+            whole width). */}
+        <div className="w-full">
           {/* Main Action Workspace area */}
-          <section className="lg:col-span-3 space-y-6">
+          <section className="space-y-6">
             
             {/* Tab: RECONCILIATION */}
             {activeTab === 'recon' && (
@@ -2360,8 +2382,6 @@ export default function App() {
                         <th className="p-3.5 font-semibold">Line of Business</th>
                         <th className="p-3.5 font-semibold text-center">New/Renewal</th>
                         <th className="p-3.5 text-right font-semibold">Premium ($)</th>
-                        <th className="p-3.5 text-right font-semibold">Payroll ($)</th>
-                        <th className="p-3.5 text-right font-semibold"># Emp</th>
                         <th className="p-3.5 font-semibold">Method</th>
                         <th className="p-3.5 text-right font-semibold font-mono text-green-700">Expected ($)</th>
                         <th className="p-3.5 pr-6 font-semibold text-center">Delete</th>
@@ -2370,7 +2390,7 @@ export default function App() {
                     <tbody className="divide-y divide-slate-100 font-mono">
                       {policies.length === 0 ? (
                         <tr>
-                          <td colSpan={12} className="p-8 text-center text-slate-400 font-sans">
+                          <td colSpan={10} className="p-8 text-center text-slate-400 font-sans">
                             No active won policies logged. Click "Log New Won Policy" to get started!
                           </td>
                         </tr>
@@ -2401,8 +2421,6 @@ export default function App() {
                                 </span>
                               </td>
                               <td className="p-3.5 text-right text-slate-700">{formatCurrency(policy.premiumAmount)}</td>
-                              <td className="p-3.5 text-right text-slate-500">{formatCurrency(policy.payrollAmount)}</td>
-                              <td className="p-3.5 text-right text-slate-500">{policy.numberOfEmployees || '-'}</td>
                               <td className="p-3.5 font-sans">
                                 {lookup.ruleFound ? (
                                   <span className="text-slate-600 font-medium text-[11px]">
@@ -3322,120 +3340,6 @@ export default function App() {
             )}
           </section>
 
-          {/* Right Sidebar Widget Panel: QuickBooks group ledger */}
-          <aside className="lg:col-span-1 space-y-6">
-            
-            {/* QuickBooks summary Card */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <BookOpen className="w-4 h-4 text-emerald-400" />
-                  <h3 className="font-semibold text-xs font-mono uppercase tracking-wider">
-                    QuickBooks Summary
-                  </h3>
-                </div>
-                <span className="text-[10px] font-mono text-slate-400">BY CARRIER</span>
-              </div>
-
-              {/* Little info alert */}
-              <div className="p-4 bg-blue-50 border-b border-slate-100 flex gap-2 text-[11px] text-blue-800 leading-normal">
-                <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
-                <p>
-                  Record the resolved <strong>Received</strong> totals as Commission Income in QB by carrier. Use the details below.
-                </p>
-              </div>
-
-              {/* Carrier Ledger details */}
-              <div className="divide-y divide-slate-100 p-2.5">
-                {carrierSummaries.length === 0 ? (
-                  <p className="p-4 text-center text-xs text-slate-400">
-                    No active carriers to group. Match won policies first!
-                  </p>
-                ) : (
-                  carrierSummaries.map((summary) => (
-                    <div
-                      key={summary.carrier}
-                      className="p-3 hover:bg-slate-50 rounded-lg transition flex flex-col gap-1.5"
-                    >
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-xs text-slate-800 tracking-tight block truncate max-w-[120px]">
-                          {summary.carrier}
-                        </span>
-                        <button
-                          onClick={() => copyCarrierToClipboard(summary)}
-                          className="px-1.5 py-1 text-[10px] text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded border border-slate-200 flex items-center gap-1 transition"
-                          title="Copy details to clipboard"
-                        >
-                          {copiedCarrier === summary.carrier ? (
-                            <>
-                              <Check className="w-3 h-3 text-emerald-500" />
-                              Copied!
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3 h-3" />
-                              Copy
-                            </>
-                          )}
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-1 text-[11px] font-mono">
-                        <div>
-                          <span className="block text-slate-400 text-[9px] uppercase">Expected</span>
-                          <span className="text-slate-700 font-semibold">{formatCurrency(summary.expected)}</span>
-                        </div>
-                        <div>
-                          <span className="block text-slate-400 text-[9px] uppercase">Received</span>
-                          <span className="text-emerald-600 font-bold">{formatCurrency(summary.received)}</span>
-                        </div>
-                        <div>
-                          <span className="block text-slate-400 text-[9px] uppercase">Short</span>
-                          <span className={`font-bold ${summary.short > 0 ? 'text-amber-500' : 'text-slate-400'}`}>
-                            {formatCurrency(summary.short)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* QuickBooks guidelines footer */}
-              <div className="p-3 bg-slate-50 border-t border-slate-100 text-[10px] text-slate-400 text-center font-mono">
-                Risk Solutions Group • Audit Ledger
-              </div>
-            </div>
-
-            {/* Quick Tips & Workflow guidelines card */}
-            <div className="bg-slate-900 text-white rounded-xl shadow-sm border border-slate-800 p-5 space-y-3.5">
-              <h4 className="text-xs font-bold font-mono text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-yellow-400 animate-pulse" />
-                Lamar's Quick Tips
-              </h4>
-              <ul className="text-xs space-y-2.5 text-slate-300">
-                <li className="flex gap-2">
-                  <span className="text-blue-400 font-bold">•</span>
-                  <span>
-                    <strong>Top 5 Focus</strong>: Spend ~15 minutes logging just your top 5 carriers. This solves 80% of your mismatch pains from day one.
-                  </span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="text-blue-400 font-bold">•</span>
-                  <span>
-                    <strong>Rule Names</strong>: Spell Carrier or LoB identically in the Rules and Won Policies tabs! The lookups are case-insensitive, but match exact text.
-                  </span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="text-blue-400 font-bold">•</span>
-                  <span>
-                    <strong>Manual Override</strong>: If a carriers rule varies dynamically, choose <strong>Manual</strong> Commission Method so you can type Expected manually on each policy row.
-                  </span>
-                </li>
-              </ul>
-            </div>
-
-          </aside>
         </div>
       </main>
     </div>

@@ -13,7 +13,7 @@ import type { ParseResult } from '../parsers/types';
 import type {
   ReconException, ReconSummary, CommissionTxn, LossOnCancel,
   CommByLineRow, CommByCarrierRow, NbVsRenewalRow, SegmentRow, MonthlyTrendRow, FeeDragRow,
-  CarrierProfile, CarrierAlias, RuleCoverage, RuleWithProvenance, RateIntake,
+  CarrierProfile, CarrierAlias, RuleCoverage, RuleWithProvenance, RateIntake, CarrierMonthRow,
 } from '../types';
 
 function fail(context: string, error: { message: string }): never {
@@ -50,7 +50,7 @@ export async function fetchReconSummary(): Promise<ReconSummary> {
 export async function fetchReconExceptions(): Promise<ReconException[]> {
   const { data, error } = await supabase
     .from('v_reconciliation_exceptions')
-    .select('exception_type, reconciliation_status, carrier_name, policy_number, client_name, lob, expected_commission, actual_commission, delta, effective_date, expiration_date, term_months, expected_pay_month, pay_basis');
+    .select('exception_type, reconciliation_status, carrier_name, policy_number, client_name, lob, expected_commission, actual_commission, delta, effective_date, expiration_date, term_months, expected_pay_month, pay_basis, term_type, new_count, renewal_count, endorsement_count, cancel_count');
   if (error) fail('Load exceptions', error);
   return (data ?? []).map((r: Record<string, unknown>) => ({
     exceptionType: r.exception_type as ReconException['exceptionType'],
@@ -67,6 +67,11 @@ export async function fetchReconExceptions(): Promise<ReconException[]> {
     termMonths: n(r.term_months),
     expectedPayMonth: n(r.expected_pay_month),
     payBasis: (r.pay_basis as string) ?? null,
+    termType: (r.term_type as ReconException['termType']) ?? null,
+    newCount: n(r.new_count) ?? 0,
+    renewalCount: n(r.renewal_count) ?? 0,
+    endorsementCount: n(r.endorsement_count) ?? 0,
+    cancelCount: n(r.cancel_count) ?? 0,
   }));
 }
 
@@ -91,6 +96,20 @@ export async function fetchPolicyTransactions(
     commissionAmount: n(r.commission_amount),
     feeType: (r.fee_type as string) ?? null,
     feeAmount: n(r.fee_amount),
+  }));
+}
+
+/** (policy_number → statement activity months) so the exception queue can be
+ * filtered to one month at a time. Dedupe client-side; the set is small. */
+export async function fetchPolicyMonths(): Promise<Array<{ policyNumber: string; monthKey: number }>> {
+  const { data, error } = await supabase
+    .from('commission_transactions')
+    .select('policy_number, month_key')
+    .not('month_key', 'is', null);
+  if (error) fail('Load policy months', error);
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    policyNumber: (r.policy_number as string) ?? '',
+    monthKey: Number(r.month_key),
   }));
 }
 
@@ -129,6 +148,7 @@ export const fetchNbVsRenewal = () => selectAll<NbVsRenewalRow>('v_nb_vs_renewal
 export const fetchAvgPremiumBySegment = () => selectAll<SegmentRow>('v_avg_premium_by_segment');
 export const fetchMonthlyTrend = () => selectAll<MonthlyTrendRow>('v_monthly_trend', { col: 'month_key' });
 export const fetchFeeDrag = () => selectAll<FeeDragRow>('v_fee_drag');
+export const fetchCarrierMonth = () => selectAll<CarrierMonthRow>('v_commission_by_carrier_month', { col: 'month_key', asc: false });
 
 // --- Rates tab (§11c) -------------------------------------------------------
 
