@@ -13,6 +13,7 @@ import type {
   WonPolicy,
   ReconciliationStatement,
   ReconciliationDiscrepancy,
+  BookSummary,
 } from '../types';
 import { supabase } from '../lib/supabase';
 import {
@@ -240,6 +241,33 @@ export async function fetchDiscrepancies(): Promise<ReconciliationDiscrepancy[]>
       (PRIORITY_RANK[a.priority] ?? 1) - (PRIORITY_RANK[b.priority] ?? 1) ||
       Math.abs(b.delta ?? 0) - Math.abs(a.delta ?? 0),
   );
+}
+
+// --- Statement transaction layer (Commission Reconciliation, Slice 1) ---------
+// Read the book-wide rollup from v_book_summary. This is the ACTUAL side — real
+// money reconciled from uploaded carrier statements — as opposed to the projected
+// expected figures the rest of this app computes from the rulebook.
+
+export async function fetchBookSummary(): Promise<BookSummary | null> {
+  const { data, error } = await supabase
+    .from('v_book_summary')
+    .select(
+      'txn_count, carrier_count, policy_count, net_written_premium, total_commission, fee_drag, net_due, effective_comm_pct',
+    )
+    .maybeSingle();
+  if (error) fail('Load book summary', error);
+  if (!data) return null;
+  const row = data as Record<string, number | null>;
+  return {
+    txnCount: row.txn_count ?? 0,
+    carrierCount: row.carrier_count ?? 0,
+    policyCount: row.policy_count ?? 0,
+    netWrittenPremium: row.net_written_premium ?? 0,
+    totalCommission: row.total_commission ?? 0,
+    feeDrag: row.fee_drag ?? 0,
+    netDue: row.net_due ?? 0,
+    effectiveCommPct: row.effective_comm_pct ?? 0,
+  };
 }
 
 export async function resolveDiscrepancy(

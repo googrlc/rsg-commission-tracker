@@ -77,6 +77,20 @@ export interface CarrierSchedule {
   notes?: string;
 }
 
+// Book-wide rollup off the statement transaction layer (v_book_summary,
+// Commission Reconciliation spec §5). Real actual money from uploaded statements,
+// not projected estimates.
+export interface BookSummary {
+  txnCount: number;
+  carrierCount: number;
+  policyCount: number;
+  netWrittenPremium: number;
+  totalCommission: number;
+  feeDrag: number;
+  netDue: number;
+  effectiveCommPct: number;
+}
+
 // A flagged discrepancy from the Hermes reconciliation ingest (Phase 3).
 // Maps to Supabase commission_reconciliation rows that are open and represent
 // an actual variance (short / overpaid / unmatched statement line).

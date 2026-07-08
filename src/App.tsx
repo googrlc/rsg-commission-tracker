@@ -49,6 +49,7 @@ import { useAuth } from './lib/auth';
 import * as repo from './data/repository';
 import { LogOut, RotateCw } from 'lucide-react';
 import ReconciliationQueue from './components/ReconciliationQueue';
+import StatementBookSummary from './components/StatementBookSummary';
 
 export default function App() {
   const { email, signOut } = useAuth();
@@ -1105,6 +1106,9 @@ export default function App() {
             {/* Tab: RECONCILIATION */}
             {activeTab === 'recon' && (
               <div className="space-y-6 animate-in fade-in duration-200">
+                {/* Reconciled statement book — real actual money from uploaded
+                    carrier statements (Commission Reconciliation Slice 1). */}
+                <StatementBookSummary />
                 {/* Visual Chart & Cash Timing Bento Panel */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                   {/* Recharts Bar Chart Card (Takes 2 cols on desktop) */}
