@@ -31,6 +31,7 @@ const STATUS_STYLE: Record<string, { label: string; cls: string }> = {
   missing_statement: { label: 'missing stmt', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
   unmatched_statement: { label: 'not in ledger', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
   rolled_up: { label: 'rolled up', cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+  canceled: { label: 'canceled', cls: 'bg-orange-50 text-orange-700 border-orange-200' },
 };
 
 export function StatusBadge({ status }: { status: ReconStatus | string }) {

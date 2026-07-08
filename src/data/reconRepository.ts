@@ -41,13 +41,16 @@ export async function fetchReconSummary(): Promise<ReconSummary> {
     missingCount: n(r.missing_count) ?? 0,
     unmatchedCount: n(r.unmatched_count) ?? 0,
     unmatchedActual: n(r.unmatched_actual) ?? 0,
+    canceledCount: n(r.canceled_count) ?? 0,
+    canceledActual: n(r.canceled_actual) ?? 0,
+    canceledChurn: n(r.canceled_churn) ?? 0,
   };
 }
 
 export async function fetchReconExceptions(): Promise<ReconException[]> {
   const { data, error } = await supabase
     .from('v_reconciliation_exceptions')
-    .select('exception_type, reconciliation_status, carrier_name, policy_number, client_name, lob, expected_commission, actual_commission, delta');
+    .select('exception_type, reconciliation_status, carrier_name, policy_number, client_name, lob, expected_commission, actual_commission, delta, effective_date, expiration_date, term_months, expected_pay_month, pay_basis');
   if (error) fail('Load exceptions', error);
   return (data ?? []).map((r: Record<string, unknown>) => ({
     exceptionType: r.exception_type as ReconException['exceptionType'],
@@ -59,6 +62,11 @@ export async function fetchReconExceptions(): Promise<ReconException[]> {
     expectedCommission: n(r.expected_commission),
     actualCommission: n(r.actual_commission),
     delta: n(r.delta),
+    effectiveDate: (r.effective_date as string) ?? null,
+    expirationDate: (r.expiration_date as string) ?? null,
+    termMonths: n(r.term_months),
+    expectedPayMonth: n(r.expected_pay_month),
+    payBasis: (r.pay_basis as string) ?? null,
   }));
 }
 

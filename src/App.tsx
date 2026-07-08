@@ -51,6 +51,7 @@ import { LogOut, RotateCw } from 'lucide-react';
 import ReconciliationQueue from './components/ReconciliationQueue';
 import StatementBookSummary from './components/StatementBookSummary';
 import CommissionWorkspace from './components/recon/CommissionWorkspace';
+import DashboardPage from './components/recon/DashboardPage';
 
 export default function App() {
   const { email, signOut } = useAuth();
@@ -72,7 +73,7 @@ export default function App() {
   const [dataError, setDataError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide' | 'workspace'>('recon');
+  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide' | 'workspace' | 'dashboard'>('recon');
   const [rulesSubTab, setRulesSubTab] = useState<'rules' | 'schedules'>('rules');
   const [searchQuery, setSearchQuery] = useState('');
   const [reconFilter, setReconFilter] = useState<'All' | 'Shorts' | 'Perfect' | 'Excess'>('All');
@@ -920,6 +921,18 @@ export default function App() {
     );
   }
 
+  // Standalone Commission Dashboard — the §11b analytics as its own page.
+  if (activeTab === 'dashboard') {
+    return (
+      <DashboardPage
+        email={email}
+        signOut={signOut}
+        onExit={() => setActiveTab('recon')}
+        onOpenWorkspace={() => setActiveTab('workspace')}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {/* Top Banner and Brand Navbar */}
@@ -942,6 +955,14 @@ export default function App() {
 
             {/* Account + data controls */}
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition flex items-center gap-1.5"
+                title="Book-wide commission analytics dashboard"
+              >
+                <TrendingUp className="w-3.5 h-3.5" />
+                Dashboard
+              </button>
               <button
                 onClick={() => setActiveTab('workspace')}
                 className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg border border-blue-500 transition flex items-center gap-1.5"

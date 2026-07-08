@@ -48,6 +48,8 @@ const CROSS_CHECK_TOLERANCE = 0.02; // dollars
 const C = {
   insured: 0,
   policy: 1,
+  effDate: 2,
+  expDate: 3,
   prod: 4,
   tranCode: 6,
   tranDate: 7,
@@ -130,6 +132,8 @@ export function parseProgressiveV1(input: ParserInput): ParseResult {
       raw_row: {
         insured_name: cell(row, C.insured),
         policy_number: cell(row, C.policy),
+        policy_effective_date: cell(row, C.effDate),
+        policy_expiration_date: cell(row, C.expDate),
         prod: cell(row, C.prod),
         tran_code: cell(row, C.tranCode),
         tran_date: cell(row, C.tranDate),

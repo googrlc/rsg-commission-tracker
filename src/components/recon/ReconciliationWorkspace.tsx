@@ -13,7 +13,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { X, Wrench, AlertTriangle, TrendingDown, Search } from 'lucide-react';
 import type { ReconException, ReconSummary, CommissionTxn, LossOnCancel } from '../../types';
 import * as recon from '../../data/reconRepository';
-import { Card, Spinner, ErrorNote, StatusBadge, DeltaMoney, formatCurrencyDecimal } from './shared';
+import { Card, Spinner, ErrorNote, StatusBadge, DeltaMoney, formatCurrencyDecimal, monthLabel } from './shared';
 
 type Bucket = 'priced_matched' | 'no_expected' | 'unmatched' | 'missing' | null;
 const BUCKET_STATUSES: Record<string, string[]> = {
@@ -126,6 +126,20 @@ export default function ReconciliationWorkspace({
         })}
       </div>
 
+      {/* Canceled policies are reconciled to their pro-rated actual and kept OUT of
+          the shorts queue (spec §4.3) — surfaced here + in Churn so they're never
+          mistaken for money the carrier owes. */}
+      {summary.canceledCount > 0 && (
+        <div className="flex items-start gap-2 text-[12px] text-orange-800 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+          <TrendingDown className="w-4 h-4 mt-0.5 shrink-0 text-orange-500" />
+          <span>
+            <b>{summary.canceledCount}</b> canceled {summary.canceledCount === 1 ? 'policy' : 'policies'} reconciled to
+            actual ({formatCurrencyDecimal(summary.canceledActual)} kept) — excluded from shorts, because a cancel is
+            <b> churn</b>, not a carrier shortage. Per-client loss is in Churn below.
+          </span>
+        </div>
+      )}
+
       {/* Exception queue */}
       <Card
         title="Exception queue"
@@ -148,13 +162,16 @@ export default function ReconciliationWorkspace({
         }
       >
         <div className="overflow-x-auto -mx-2">
-          <table className="w-full text-xs min-w-[720px]">
+          <table className="w-full text-xs min-w-[980px]">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
                 <th className="text-left font-medium py-2 px-2">Client</th>
                 <th className="text-left font-medium px-2">Carrier</th>
                 <th className="text-left font-medium px-2">Policy #</th>
                 <th className="text-left font-medium px-2">LOB</th>
+                <th className="text-left font-medium px-2">Effective</th>
+                <th className="text-left font-medium px-2">Expiration</th>
+                <th className="text-left font-medium px-2">Exp. pay</th>
                 <th className="text-right font-medium px-2">Expected</th>
                 <th className="text-right font-medium px-2">Actual</th>
                 <th className="text-right font-medium px-2">Delta</th>
@@ -164,7 +181,7 @@ export default function ReconciliationWorkspace({
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={9} className="text-center text-slate-400 py-6">No rows for this filter.</td></tr>
+                <tr><td colSpan={12} className="text-center text-slate-400 py-6">No rows for this filter.</td></tr>
               )}
               {filtered.map((r, i) => (
                 <tr key={`${r.carrierName}-${r.policyNumber}-${i}`}
@@ -174,6 +191,14 @@ export default function ReconciliationWorkspace({
                   <td className="px-2 text-slate-600">{r.carrierName}</td>
                   <td className="px-2 font-mono text-slate-500">{r.policyNumber ?? '—'}</td>
                   <td className="px-2 text-slate-500">{r.lob ?? '—'}</td>
+                  <td className="px-2 font-mono text-slate-500">{r.effectiveDate ?? '—'}</td>
+                  <td className="px-2 font-mono text-slate-500">
+                    {r.expirationDate ?? '—'}
+                    {r.termMonths != null && <span className="text-slate-400"> · {r.termMonths}mo</span>}
+                  </td>
+                  <td className="px-2 font-mono text-slate-500" title={r.payBasis ?? undefined}>
+                    {r.expectedPayMonth ? monthLabel(r.expectedPayMonth) : '—'}
+                  </td>
                   <td className="px-2 text-right font-mono text-slate-600">{r.expectedCommission == null ? '—' : formatCurrencyDecimal(r.expectedCommission)}</td>
                   <td className="px-2 text-right font-mono text-slate-800">{r.actualCommission == null ? '—' : formatCurrencyDecimal(r.actualCommission)}</td>
                   <td className="px-2 text-right"><DeltaMoney value={r.delta} /></td>
@@ -269,6 +294,12 @@ function PolicySlideOver({ row, txns, onClose }: {
           <div>
             <h3 className="text-sm font-bold text-slate-900">{row.clientName ?? 'Policy'} </h3>
             <p className="text-[11px] text-slate-500 font-mono">{row.carrierName} · {row.policyNumber ?? '—'} · {row.lob ?? ''}</p>
+            <p className="text-[11px] text-slate-500 font-mono mt-1">
+              Term {row.effectiveDate ?? '—'} → {row.expirationDate ?? '—'}
+              {row.termMonths != null && ` (${row.termMonths}mo)`}
+              {row.expectedPayMonth ? ` · expected pay ${monthLabel(row.expectedPayMonth)}` : ''}
+            </p>
+            {row.payBasis && <p className="text-[10px] text-slate-400 mt-0.5">{row.payBasis}</p>}
             <div className="mt-2 flex items-center gap-3 text-xs">
               <span className="text-slate-500">Expected <b className="font-mono text-slate-700">{row.expectedCommission == null ? '—' : formatCurrencyDecimal(row.expectedCommission)}</b></span>
               <span className="text-slate-500">Actual <b className="font-mono text-slate-800">{row.actualCommission == null ? '—' : formatCurrencyDecimal(row.actualCommission)}</b></span>

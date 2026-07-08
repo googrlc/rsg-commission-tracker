@@ -96,9 +96,10 @@ export interface BookSummary {
 
 export type ReconStatus =
   | 'matched' | 'underpaid' | 'overpaid'
-  | 'no_expected' | 'missing_statement' | 'unmatched_statement' | 'rolled_up';
+  | 'no_expected' | 'missing_statement' | 'unmatched_statement' | 'rolled_up'
+  | 'canceled';
 
-/** v_reconciliation_summary — the §11a 4-bucket health strip. */
+/** v_reconciliation_summary — the §11a health strip. */
 export interface ReconSummary {
   pricedMatchedCount: number;
   pricedMatchedActual: number;
@@ -110,6 +111,11 @@ export interface ReconSummary {
   missingCount: number;
   unmatchedCount: number;
   unmatchedActual: number;
+  // Canceled policies (spec §4.3): reconciled to their pro-rated actual, excluded
+  // from the shorts queue. churn = expected − actual = commission lost to the cancel.
+  canceledCount: number;
+  canceledActual: number;
+  canceledChurn: number;
 }
 
 /** One row of v_reconciliation_exceptions (§11a exception queue). */
@@ -123,6 +129,12 @@ export interface ReconException {
   expectedCommission: number | null;
   actualCommission: number | null;
   delta: number | null;
+  // Term + timing (sourced from NowCerts via commission_ledger; null until backfilled).
+  effectiveDate: string | null;
+  expirationDate: string | null;
+  termMonths: number | null;
+  expectedPayMonth: number | null; // YYYYMM
+  payBasis: string | null;         // human-readable, derived from carrier payment_model
 }
 
 /** One commission_transactions row (policy detail slide-over). */
