@@ -50,6 +50,7 @@ import * as repo from './data/repository';
 import { LogOut, RotateCw } from 'lucide-react';
 import ReconciliationQueue from './components/ReconciliationQueue';
 import StatementBookSummary from './components/StatementBookSummary';
+import CommissionWorkspace from './components/recon/CommissionWorkspace';
 
 export default function App() {
   const { email, signOut } = useAuth();
@@ -71,7 +72,7 @@ export default function App() {
   const [dataError, setDataError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide'>('recon');
+  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide' | 'workspace'>('recon');
   const [rulesSubTab, setRulesSubTab] = useState<'rules' | 'schedules'>('rules');
   const [searchQuery, setSearchQuery] = useState('');
   const [reconFilter, setReconFilter] = useState<'All' | 'Shorts' | 'Perfect' | 'Excess'>('All');
@@ -907,6 +908,18 @@ export default function App() {
     );
   }
 
+  // §11 Commission Workspace (statement reconciliation) — a self-contained shell
+  // over the transaction layer. Entered from the classic view; returns via onExit.
+  if (activeTab === 'workspace') {
+    return (
+      <CommissionWorkspace
+        email={email}
+        signOut={signOut}
+        onExit={() => setActiveTab('recon')}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {/* Top Banner and Brand Navbar */}
@@ -929,6 +942,14 @@ export default function App() {
 
             {/* Account + data controls */}
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setActiveTab('workspace')}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg border border-blue-500 transition flex items-center gap-1.5"
+                title="Statement reconciliation workspace (uploaded carrier statements)"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                Commission Workspace
+              </button>
               {email && (
                 <span className="text-[11px] text-slate-400 font-mono px-2 py-1 rounded-md bg-slate-800/60 border border-slate-700">
                   {email}

@@ -91,6 +91,142 @@ export interface BookSummary {
   effectiveCommPct: number;
 }
 
+// --- Commission Reconciliation Slices 2–3 (statement transaction layer) --------
+// Read-only view rows are typed in DB (snake_case) shape for a thin mapping layer.
+
+export type ReconStatus =
+  | 'matched' | 'underpaid' | 'overpaid'
+  | 'no_expected' | 'missing_statement' | 'unmatched_statement' | 'rolled_up';
+
+/** v_reconciliation_summary — the §11a 4-bucket health strip. */
+export interface ReconSummary {
+  pricedMatchedCount: number;
+  pricedMatchedActual: number;
+  underpaidCount: number;
+  underpaidDelta: number;
+  overpaidCount: number;
+  noExpectedCount: number;
+  noExpectedActual: number;
+  missingCount: number;
+  unmatchedCount: number;
+  unmatchedActual: number;
+}
+
+/** One row of v_reconciliation_exceptions (§11a exception queue). */
+export interface ReconException {
+  exceptionType: 'ledger_variance' | 'unmatched_statement';
+  reconciliationStatus: ReconStatus;
+  carrierName: string;
+  policyNumber: string | null;
+  clientName: string | null;
+  lob: string | null;
+  expectedCommission: number | null;
+  actualCommission: number | null;
+  delta: number | null;
+}
+
+/** One commission_transactions row (policy detail slide-over). */
+export interface CommissionTxn {
+  id: string;
+  transactionCode: string | null;
+  transactionType: string | null;
+  transactionDate: string | null;
+  lob: string | null;
+  grossPremium: number | null;
+  commissionRate: number | null;
+  commissionAmount: number | null;
+  feeType: string | null;
+  feeAmount: number | null;
+}
+
+/** One row of v_loss_on_cancel (§11a churn panel). */
+export interface LossOnCancel {
+  carrierName: string;
+  paymentModel: string | null;
+  policyNumber: string | null;
+  insuredName: string | null;
+  clientName: string | null;
+  lob: string | null;
+  transactionDate: string | null;
+  realizedClawback: number;
+  lossAmount: number | null;
+  lossBasis: string;
+}
+
+/** Dashboard view rows (§11b) — snake_case matches the DB views. */
+export interface CommByLineRow { lob: string | null; txn_count: number; policy_count: number; net_written_premium: number; total_commission: number; effective_comm_pct: number; min_rate: number | null; max_rate: number | null; }
+export interface CommByCarrierRow { carrier_name: string; txn_count: number; policy_count: number; net_written_premium: number; total_commission: number; fee_drag: number; effective_comm_pct: number; min_rate: number | null; max_rate: number | null; }
+export interface NbVsRenewalRow { business_type: string; term_count: number; written_premium: number; avg_premium: number; total_commission: number; effective_comm_pct: number; }
+export interface SegmentRow { segment: string | null; term_count: number; avg_premium: number; written_premium: number; }
+export interface MonthlyTrendRow { month_key: number; txn_count: number; net_premium: number; commission: number; fees: number; }
+export interface FeeDragRow { carrier_name: string; fee_type: string; fee_count: number; fee_total: number; }
+
+/** carrier_commission_profile (§11d). */
+export interface CarrierProfile {
+  id: string;
+  carrierName: string;
+  paymentModel: 'as_earned' | 'advance' | 'hybrid' | 'confirm_on_upload';
+  defaultNbPercent: number | null;
+  defaultRenewalPercent: number | null;
+  clawbackWindowMonths: number | null;
+  statementFormat: string | null;
+  statementParserKey: string | null;
+  notes: string | null;
+}
+
+/** carrier_alias_map (§11d). */
+export interface CarrierAlias {
+  id: string;
+  rawName: string;
+  canonicalCarrier: string;
+}
+
+/** Coverage indicator row (v_rule_coverage, §11c). */
+export interface RuleCoverage {
+  carrier: string;
+  ledgerPolicies: number;
+  unpriced: number;
+  priced: number;
+}
+
+/** commission_rules row with §10 provenance (Rates tab table). */
+export interface RuleWithProvenance {
+  id: string;
+  carrierName: string;
+  mgaName: string | null;
+  lob: string | null;
+  state: string | null;
+  nbPercent: number | null;
+  renewalPercent: number | null;
+  commissionMethod: string | null;
+  sourceType: string | null;
+  confidence: string | null;
+  lastConfirmedDate: string | null;
+  observedDate: string | null;
+  supersededBy: string | null;
+  active: boolean;
+}
+
+/** carrier_rate_intake row (§10 review queue). */
+export interface RateIntake {
+  id: string;
+  carrierName: string;
+  canonicalCarrier: string | null;
+  lob: string | null;
+  state: string | null;
+  mgaName: string | null;
+  proposedNbPercent: number | null;
+  proposedRenewalPercent: number | null;
+  flatFee: number | null;
+  commissionMethod: string | null;
+  sourceType: string;
+  sourceDocument: string | null;
+  observedDate: string | null;
+  confidence: string;
+  status: 'pending' | 'approved' | 'rejected';
+  conflictRuleId: string | null;
+}
+
 // A flagged discrepancy from the Hermes reconciliation ingest (Phase 3).
 // Maps to Supabase commission_reconciliation rows that are open and represent
 // an actual variance (short / overpaid / unmatched statement line).
