@@ -8,6 +8,7 @@
 
 import * as XLSX from 'xlsx';
 import type { RawRow } from './types';
+import { looksLikeNext } from './next_v1';
 
 export interface Workbook {
   sheetNames: string[];
@@ -34,10 +35,17 @@ export async function readWorkbook(file: File): Promise<Workbook> {
  * Returns null when the format is unrecognized — caller must NOT guess.
  */
 export function detectParserKey(wb: Workbook): string | null {
+  // Progressive: multi-sheet xlsx with a 'Detailed' line-item sheet.
   const hasDetailed = wb.sheetNames.includes('Detailed');
-  const header = hasDetailed ? wb.sheet('Detailed')?.[0] ?? [] : [];
+  const pHeader = hasDetailed ? wb.sheet('Detailed')?.[0] ?? [] : [];
   const looksProgressive =
     /detailedstatement/i.test(wb.sourceFilename) ||
-    (hasDetailed && String(header[6] ?? '').trim() === 'Tran Code' && String(header[1] ?? '').trim() === 'Policy Number');
-  return looksProgressive ? 'progressive_v1' : null;
+    (hasDetailed && String(pHeader[6] ?? '').trim() === 'Tran Code' && String(pHeader[1] ?? '').trim() === 'Policy Number');
+  if (looksProgressive) return 'progressive_v1';
+
+  // NEXT: single-sheet CSV; sniff the first sheet's header row for its signature.
+  const firstSheet = wb.sheet(wb.sheetNames[0]);
+  if (firstSheet && firstSheet.length > 0 && looksLikeNext(firstSheet[0])) return 'next_v1';
+
+  return null;
 }

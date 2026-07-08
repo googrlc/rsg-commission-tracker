@@ -134,10 +134,17 @@ export function deriveSegment(prod: RawCell): 'personal' | 'commercial' | null {
   return /commercial|comm\.?\s*veh/i.test(String(prod)) ? 'commercial' : 'personal';
 }
 
-/** Parse "MM/DD/YYYY", "YYYY-MM-DD", or a JS Date → ISO yyyy-mm-dd (or null). */
+/** Parse "MM/DD/YYYY", "YYYY-MM-DD", a JS Date, or an Excel serial → ISO yyyy-mm-dd. */
 export function toIsoDate(v: RawCell): string | null {
   if (v == null || v === '') return null;
   if (v instanceof Date) return v.toISOString().slice(0, 10);
+  // SheetJS with raw:true returns date cells (incl. CSV auto-detected dates) as
+  // Excel serials — days since 1899-12-30. Convert with pure UTC math so there's
+  // no timezone off-by-one.
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0 && v < 2958466) {
+    return new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000)
+      .toISOString().slice(0, 10);
+  }
   const s = String(v).trim();
   const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (mdy) {

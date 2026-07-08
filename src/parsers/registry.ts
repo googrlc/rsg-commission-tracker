@@ -10,9 +10,11 @@
 
 import type { StatementParser } from './types';
 import { parseProgressiveV1, PROGRESSIVE_V1_KEY } from './progressive_v1';
+import { parseNextV1, NEXT_V1_KEY } from './next_v1';
 
 const REGISTRY: Record<string, StatementParser> = {
   [PROGRESSIVE_V1_KEY]: parseProgressiveV1,
+  [NEXT_V1_KEY]: parseNextV1,
 };
 
 export function getParser(parserKey: string | null | undefined): StatementParser | null {
@@ -24,4 +26,4 @@ export function registeredParserKeys(): string[] {
   return Object.keys(REGISTRY);
 }
 
-export { PROGRESSIVE_V1_KEY };
+export { PROGRESSIVE_V1_KEY, NEXT_V1_KEY };
