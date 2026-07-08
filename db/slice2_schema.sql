@@ -40,8 +40,15 @@ create policy carrier_rate_intake_allowlist_update on public.carrier_rate_intake
 create policy carrier_rate_intake_allowlist_delete on public.carrier_rate_intake for delete to authenticated using (is_commission_user());
 create policy carrier_rate_intake_service_role on public.carrier_rate_intake for all to service_role using (true) with check (true);
 
--- Let the app run reconciliation via RPC after an upload (SECURITY DEFINER).
-alter function public.reconcile_carrier(text, numeric) security definer set search_path = public, pg_temp;
+-- Let the app run reconciliation via RPC after an upload. reconcile_carrier is
+-- SECURITY DEFINER (temp tables + ledger writes run as owner) but carries an
+-- in-body guard: `is_commission_user() OR session_user in (postgres/…)`, so a
+-- self-signup authenticated user who isn't allowlisted is rejected. Default
+-- PUBLIC/anon EXECUTE is revoked; only authenticated may call it.
+-- (Guarded function body lives with the function in migrations; see
+--  commission_recon_reconcile_fn_guard.)
+revoke execute on function public.reconcile_carrier(text, numeric) from public;
+revoke execute on function public.reconcile_carrier(text, numeric) from anon;
 grant execute on function public.reconcile_carrier(text, numeric) to authenticated;
 
 -- §11c coverage indicator: unpriced (NULL-expected) ledger rows per canonical carrier.
