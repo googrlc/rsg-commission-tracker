@@ -90,6 +90,20 @@ PY
 $GC run services replace /tmp/svc.yaml --region us-east1 --project $PROJECT
 ```
 
+**If step 1 crashes with `lost gzip_file` / `OSError: unexpected end of data`** —
+a gcloud bug creating the source tarball on Python 3.12+ (hits every local Python
+here, 3.11–3.14). Build the archive with system `tar` and submit it from GCS, which
+skips gcloud's broken gzip path entirely:
+```bash
+tar czf /tmp/src.tgz --exclude=node_modules --exclude=dist --exclude=.git \
+  --exclude='.env' --exclude='.env.local' .
+$GC storage cp /tmp/src.tgz gs://${PROJECT}_cloudbuild/source/manual.tgz
+$GC builds submit gs://${PROJECT}_cloudbuild/source/manual.tgz --config cloudbuild.yaml \
+  --substitutions=_IMAGE=$IMG,_SUPA_URL=…,_SUPA_KEY=… --project $PROJECT --region us-east1
+```
+Then continue with steps 2–3 above. (`.gcloudignore` keeps the normal path's tarball
+lean, but does not by itself fix the gzip crash.)
+
 One-time setup already done (July 7 2026): created the Artifact Registry repo
 `cloud-run-source-deploy` (us-east1), granted `roles/artifactregistry.writer` to
 the compute + cloudbuild service accounts, enabled `cloudresourcemanager` API,
