@@ -156,7 +156,7 @@ export const fetchCarrierMonth = () => selectAll<CarrierMonthRow>('v_commission_
 export async function fetchPaymentSchedules(): Promise<CarrierPaymentSchedule[]> {
   const { data, error } = await supabase
     .from('carrier_payment_schedule')
-    .select('id, carrier_name, kind, pay_day, close_day, weekend_rule, explicit, schedule_year, color, notes')
+    .select('id, carrier_name, kind, pay_day, close_day, day_basis, weekend_rule, explicit, schedule_year, color, notes')
     .order('carrier_name', { ascending: true });
   if (error) fail('Load payment schedules', error);
   return (data ?? []).map((r: Record<string, unknown>) => ({
@@ -165,6 +165,7 @@ export async function fetchPaymentSchedules(): Promise<CarrierPaymentSchedule[]>
     kind: (r.kind as CarrierPaymentSchedule['kind']) ?? 'day_of_month',
     payDay: n(r.pay_day),
     closeDay: n(r.close_day),
+    dayBasis: (r.day_basis as CarrierPaymentSchedule['dayBasis']) ?? 'calendar',
     weekendRule: (r.weekend_rule as CarrierPaymentSchedule['weekendRule']) ?? 'none',
     explicit: (r.explicit as CarrierPaymentSchedule['explicit']) ?? null,
     scheduleYear: n(r.schedule_year),

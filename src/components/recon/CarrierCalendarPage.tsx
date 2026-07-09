@@ -37,6 +37,21 @@ const keyOf = (y: number, m0: number, d: number) => `${y}-${pad(m0 + 1)}-${pad(d
 const daysIn = (y: number, m0: number) => new Date(y, m0 + 1, 0).getDate();
 const parseISO = (s: string) => { const [y, m, d] = s.split('-').map(Number); return { y, m0: m - 1, d }; };
 
+const ord = (n: number) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; };
+
+/** The Nth working day (Mon–Fri) of the month. Holidays are NOT skipped — per Lamar,
+ * a bank holiday's day-late shift "happens regardless"; the calendar shows this date. */
+function nthBusinessDay(y: number, m0: number, n: number): { y: number; m0: number; d: number } | null {
+  let count = 0;
+  const dim = daysIn(y, m0);
+  for (let d = 1; d <= dim; d++) {
+    const wd = new Date(y, m0, d).getDay();
+    if (wd === 0 || wd === 6) continue;
+    if (++count === n) return { y, m0, d };
+  }
+  return null;
+}
+
 /** Roll a (year, month, day) off a weekend per the rule; returns {m0,d} within calc. */
 function rollWeekend(y: number, m0: number, d: number, rule: 'none' | 'prev' | 'next') {
   if (rule === 'none') return { y, m0, d };
@@ -56,17 +71,12 @@ function buildEvents(schedules: CarrierPaymentSchedule[], year: number): Map<str
 
   for (const s of schedules) {
     if (s.kind === 'day_of_month') {
+      const compute = (m0: number, dayNum: number) => s.dayBasis === 'business'
+        ? nthBusinessDay(year, m0, dayNum)
+        : rollWeekend(year, m0, Math.min(dayNum, daysIn(year, m0)), s.weekendRule);
       for (let m0 = 0; m0 < 12; m0++) {
-        if (s.payDay) {
-          const day = Math.min(s.payDay, daysIn(year, m0));
-          const r = rollWeekend(year, m0, day, s.weekendRule);
-          if (r.y === year) add(keyOf(r.y, r.m0, r.d), { carrier: s.carrierName, color: s.color, type: 'pay' });
-        }
-        if (s.closeDay) {
-          const day = Math.min(s.closeDay, daysIn(year, m0));
-          const r = rollWeekend(year, m0, day, s.weekendRule);
-          if (r.y === year) add(keyOf(r.y, r.m0, r.d), { carrier: s.carrierName, color: s.color, type: 'close' });
-        }
+        if (s.payDay) { const r = compute(m0, s.payDay); if (r && r.y === year) add(keyOf(r.y, r.m0, r.d), { carrier: s.carrierName, color: s.color, type: 'pay' }); }
+        if (s.closeDay) { const r = compute(m0, s.closeDay); if (r && r.y === year) add(keyOf(r.y, r.m0, r.d), { carrier: s.carrierName, color: s.color, type: 'close' }); }
       }
     } else if (s.kind === 'explicit' && s.explicit) {
       for (const row of s.explicit) {
@@ -230,8 +240,8 @@ function ScheduleTable({ s, year }: { s: CarrierPaymentSchedule; year: number })
       for (let m0 = 0; m0 < 12; m0++) {
         const mk = (dayNum: number | null) => {
           if (!dayNum) return null;
-          const day = Math.min(dayNum, daysIn(year, m0));
-          const r = rollWeekend(year, m0, day, s.weekendRule);
+          if (s.dayBasis === 'business') { const r = nthBusinessDay(year, m0, dayNum); return r ? keyOf(r.y, r.m0, r.d) : null; }
+          const r = rollWeekend(year, m0, Math.min(dayNum, daysIn(year, m0)), s.weekendRule);
           return keyOf(r.y, r.m0, r.d);
         };
         out.push({ month: MONTHS[m0], close: mk(s.closeDay), pay: mk(s.payDay) });
@@ -252,7 +262,13 @@ function ScheduleTable({ s, year }: { s: CarrierPaymentSchedule; year: number })
   return (
     <Card
       title={s.carrierName}
-      subtitle={s.kind === 'explicit' ? `Published schedule${s.scheduleYear ? ` (${s.scheduleYear})` : ''}` : `Rule: pays day ${s.payDay} of each month${s.weekendRule !== 'none' ? ` · weekend → ${s.weekendRule === 'prev' ? 'prior' : 'next'} business day` : ''}`}
+      subtitle={
+        s.kind === 'explicit'
+          ? `Published schedule${s.scheduleYear ? ` (${s.scheduleYear})` : ''}`
+          : s.dayBasis === 'business'
+            ? `Rule: pays the ${ord(s.payDay ?? 0)} working day of each month (Mon–Fri)`
+            : `Rule: pays day ${s.payDay} of each month${s.weekendRule !== 'none' ? ` · weekend → ${s.weekendRule === 'prev' ? 'prior' : 'next'} business day` : ''}`
+      }
       right={<span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${c.chip} flex items-center gap-1.5`}><span className={`w-2 h-2 rounded-full ${c.dot}`} />{s.notes ?? ''}</span>}
     >
       <div className="overflow-x-auto">
@@ -275,7 +291,11 @@ function ScheduleTable({ s, year }: { s: CarrierPaymentSchedule; year: number })
           </tbody>
         </table>
       </div>
-      <p className="text-[10px] text-slate-400 mt-2">⚠ = falls on a weekend. Holidays aren't adjusted for.</p>
+      <p className="text-[10px] text-slate-400 mt-2">
+        {s.dayBasis === 'business'
+          ? 'Working-day dates count Mon–Fri only. A bank holiday may push the actual deposit a day later — shown on the computed date regardless.'
+          : '⚠ marks a weekend. Holidays aren’t adjusted for.'}
+      </p>
     </Card>
   );
 }

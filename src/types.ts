@@ -204,6 +204,7 @@ export interface CarrierPaymentSchedule {
   kind: 'day_of_month' | 'explicit';
   payDay: number | null;
   closeDay: number | null;
+  dayBasis: 'calendar' | 'business';   // business = Nth working day (Mon–Fri)
   weekendRule: 'none' | 'prev' | 'next';
   explicit: Array<{ month: number; close: string | null; pay: string }> | null;
   scheduleYear: number | null;
