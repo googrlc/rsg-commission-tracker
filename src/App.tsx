@@ -138,6 +138,7 @@ export default function App() {
   const [policyFormData, setPolicyFormData] = useState<Partial<WonPolicy>>({
     policyNumber: '',
     dateWon: new Date().toISOString().split('T')[0],
+    policyEffectiveDate: '',
     clientName: '',
     carrier: '',
     lineOfBusiness: '',
@@ -408,6 +409,7 @@ export default function App() {
       id: `policy-${Date.now()}`,
       policyNumber: policyFormData.policyNumber.trim(),
       dateWon: policyFormData.dateWon || new Date().toISOString().split('T')[0],
+      policyEffectiveDate: policyFormData.policyEffectiveDate || undefined,
       clientName: policyFormData.clientName.trim(),
       carrier: policyFormData.carrier.trim(),
       lineOfBusiness: policyFormData.lineOfBusiness.trim(),
@@ -434,6 +436,7 @@ export default function App() {
       setPolicyFormData({
         policyNumber: '',
         dateWon: new Date().toISOString().split('T')[0],
+        policyEffectiveDate: '',
         clientName: '',
         carrier: '',
         lineOfBusiness: '',
@@ -2106,6 +2109,18 @@ export default function App() {
                           />
                         </div>
 
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">
+                            Effective Date
+                          </label>
+                          <input
+                            type="date"
+                            value={policyFormData.policyEffectiveDate || ''}
+                            onChange={(e) => setPolicyFormData({ ...policyFormData, policyEffectiveDate: e.target.value })}
+                            className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white text-blue-700 font-mono"
+                          />
+                        </div>
+
                         <div className="md:col-span-2">
                           <label className="block text-xs font-medium text-slate-700 mb-1">
                             Client Name <span className="text-blue-600 font-bold">*</span>
@@ -2377,6 +2392,7 @@ export default function App() {
                       <tr className="bg-slate-100 text-slate-600 uppercase font-mono tracking-wider text-[10px] border-b border-slate-200">
                         <th className="p-3.5 pl-6 font-semibold">Policy #</th>
                         <th className="p-3.5 font-semibold">Date Won</th>
+                        <th className="p-3.5 font-semibold">Eff Date</th>
                         <th className="p-3.5 font-semibold">Client</th>
                         <th className="p-3.5 font-semibold">Carrier</th>
                         <th className="p-3.5 font-semibold">Line of Business</th>
@@ -2410,6 +2426,7 @@ export default function App() {
                             >
                               <td className="p-3.5 pl-6 font-semibold text-slate-800">{policy.policyNumber}</td>
                               <td className="p-3.5 text-slate-500">{policy.dateWon}</td>
+                              <td className="p-3.5 text-slate-500">{policy.policyEffectiveDate || policy.dateWon}</td>
                               <td className="p-3.5 text-slate-800 font-sans font-medium">{policy.clientName}</td>
                               <td className="p-3.5 text-slate-600 font-sans">{policy.carrier}</td>
                               <td className="p-3.5 text-slate-600 font-sans">{policy.lineOfBusiness}</td>

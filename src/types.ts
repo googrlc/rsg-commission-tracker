@@ -28,6 +28,7 @@ export interface WonPolicy {
   id: string;
   policyNumber: string;
   dateWon: string;
+  policyEffectiveDate?: string;  // Policy effective date (from AMS or manual)
   clientName: string;
   carrier: string;
   lineOfBusiness: string;
