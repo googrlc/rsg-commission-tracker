@@ -356,11 +356,33 @@ function FullScreenLoader() {
   );
 }
 
-/** Renders children only for an authenticated, allowlisted user. */
+/** Renders children once auth has settled. */
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  // Lock screen removed — the app is embedded inside a portal that owns
-  // authentication, so we render straight through. Supabase RLS remains the
-  // real enforcement boundary on the data layer.
+  const { loading, session } = useAuth();
   if (!isSupabaseConfigured) return <ConfigError />;
+
+  // Private (Tailscale-only) build: a silent auto-sign-in runs on load. Wait for
+  // it to establish a session before rendering — otherwise the app's first
+  // queries fire as `anon` and RLS denies (permission denied). If it settles
+  // with no session, the baked credentials are wrong/not allowlisted.
+  const autoLoginConfigured = Boolean(import.meta.env.VITE_AUTOLOGIN_EMAIL);
+  if (autoLoginConfigured) {
+    if (loading) return <FullScreenLoader />;
+    if (!session) {
+      return (
+        <Shell>
+          <ShieldAlert className="w-10 h-10 text-amber-400" />
+          <h1 className="text-lg font-semibold text-slate-100">Auto sign-in failed</h1>
+          <p className="text-sm text-slate-400">
+            The built-in account couldn’t sign in. Check the VITE_AUTOLOGIN_EMAIL /
+            VITE_AUTOLOGIN_PASSWORD used at build time (must be an allowlisted user).
+          </p>
+        </Shell>
+      );
+    }
+  }
+
+  // Public build (no auto-login): the embedding portal owns authentication, so
+  // render straight through. Supabase RLS is the real data-layer boundary.
   return <>{children}</>;
 }
