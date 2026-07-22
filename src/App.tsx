@@ -1063,14 +1063,16 @@ export default function App() {
                 <RefreshCw className="w-3.5 h-3.5" />
                 Refresh
               </button>
-              <button
-                onClick={() => signOut()}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg border border-slate-700 transition flex items-center gap-1.5"
-                title="Sign out"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                Sign out
-              </button>
+              {email && (
+                <button
+                  onClick={() => signOut()}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg border border-slate-700 transition flex items-center gap-1.5"
+                  title="Sign out"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  Sign out
+                </button>
+              )}
             </div>
           </div>
         </div>
