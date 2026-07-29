@@ -53,6 +53,7 @@ import StatementBookSummary from './components/StatementBookSummary';
 import CommissionWorkspace from './components/recon/CommissionWorkspace';
 import DashboardPage from './components/recon/DashboardPage';
 import QuickBooksSummaryPage from './components/recon/QuickBooksSummaryPage';
+import CarrierCalendarPage from './components/recon/CarrierCalendarPage';
 
 export default function App() {
   const { email, signOut } = useAuth();
@@ -74,7 +75,7 @@ export default function App() {
   const [dataError, setDataError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide' | 'workspace' | 'dashboard' | 'quickbooks'>('recon');
+  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide' | 'workspace' | 'dashboard' | 'quickbooks' | 'calendar'>('recon');
   const [rulesSubTab, setRulesSubTab] = useState<'rules' | 'schedules'>('rules');
   const [searchQuery, setSearchQuery] = useState('');
   const [reconFilter, setReconFilter] = useState<'All' | 'Shorts' | 'Perfect' | 'Excess'>('All');
@@ -945,6 +946,17 @@ export default function App() {
     );
   }
 
+  // Standalone carrier payment calendar — when each carrier pays, all year.
+  if (activeTab === 'calendar') {
+    return (
+      <CarrierCalendarPage
+        email={email}
+        signOut={signOut}
+        onExit={() => setActiveTab('recon')}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {/* Top Banner and Brand Navbar */}
@@ -982,6 +994,14 @@ export default function App() {
               >
                 <BookOpen className="w-3.5 h-3.5" />
                 Month-End
+              </button>
+              <button
+                onClick={() => setActiveTab('calendar')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition flex items-center gap-1.5"
+                title="Carrier payment calendar — when each carrier pays, all year"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                Pay Calendar
               </button>
               <button
                 onClick={() => setActiveTab('workspace')}

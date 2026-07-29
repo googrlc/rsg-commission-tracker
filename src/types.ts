@@ -197,6 +197,21 @@ export interface CarrierMonthRow {
   cancel_count: number;
 }
 
+/** carrier_payment_schedule — drives the year payment calendar page. */
+export interface CarrierPaymentSchedule {
+  id: string;
+  carrierName: string;
+  kind: 'day_of_month' | 'explicit';
+  payDay: number | null;
+  closeDay: number | null;
+  dayBasis: 'calendar' | 'business';   // business = Nth working day (Mon–Fri)
+  weekendRule: 'none' | 'prev' | 'next';
+  explicit: Array<{ month: number; close: string | null; pay: string }> | null;
+  scheduleYear: number | null;
+  color: string;
+  notes: string | null;
+}
+
 /** carrier_commission_profile (§11d). */
 export interface CarrierProfile {
   id: string;

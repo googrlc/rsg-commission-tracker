@@ -1,0 +1,10 @@
+# Keep the Cloud Build source tarball to source only — the container runs
+# `npm ci` + `npm run build` itself, so deps and build output are excluded.
+.git/
+node_modules/
+dist/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example

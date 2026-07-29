@@ -14,6 +14,7 @@ import type {
   ReconException, ReconSummary, CommissionTxn, LossOnCancel,
   CommByLineRow, CommByCarrierRow, NbVsRenewalRow, SegmentRow, MonthlyTrendRow, FeeDragRow,
   CarrierProfile, CarrierAlias, RuleCoverage, RuleWithProvenance, RateIntake, CarrierMonthRow,
+  CarrierPaymentSchedule,
 } from '../types';
 
 function fail(context: string, error: { message: string }): never {
@@ -149,6 +150,29 @@ export const fetchAvgPremiumBySegment = () => selectAll<SegmentRow>('v_avg_premi
 export const fetchMonthlyTrend = () => selectAll<MonthlyTrendRow>('v_monthly_trend', { col: 'month_key' });
 export const fetchFeeDrag = () => selectAll<FeeDragRow>('v_fee_drag');
 export const fetchCarrierMonth = () => selectAll<CarrierMonthRow>('v_commission_by_carrier_month', { col: 'month_key', asc: false });
+
+// --- Carrier payment calendar ----------------------------------------------
+
+export async function fetchPaymentSchedules(): Promise<CarrierPaymentSchedule[]> {
+  const { data, error } = await supabase
+    .from('carrier_payment_schedule')
+    .select('id, carrier_name, kind, pay_day, close_day, day_basis, weekend_rule, explicit, schedule_year, color, notes')
+    .order('carrier_name', { ascending: true });
+  if (error) fail('Load payment schedules', error);
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    id: r.id as string,
+    carrierName: (r.carrier_name as string) ?? '',
+    kind: (r.kind as CarrierPaymentSchedule['kind']) ?? 'day_of_month',
+    payDay: n(r.pay_day),
+    closeDay: n(r.close_day),
+    dayBasis: (r.day_basis as CarrierPaymentSchedule['dayBasis']) ?? 'calendar',
+    weekendRule: (r.weekend_rule as CarrierPaymentSchedule['weekendRule']) ?? 'none',
+    explicit: (r.explicit as CarrierPaymentSchedule['explicit']) ?? null,
+    scheduleYear: n(r.schedule_year),
+    color: (r.color as string) ?? 'blue',
+    notes: (r.notes as string) ?? null,
+  }));
+}
 
 // --- Rates tab (§11c) -------------------------------------------------------
 
