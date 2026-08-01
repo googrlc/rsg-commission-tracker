@@ -16,6 +16,17 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
+  // Allow the SPA to be embedded in an iframe by any portal, while still
+  // working when opened full-screen standalone. We explicitly drop the legacy
+  // X-Frame-Options header (which some proxies inject as DENY/SAMEORIGIN) and
+  // set a permissive frame-ancestors CSP. Data access stays protected by
+  // Supabase RLS regardless of who frames the page.
+  app.use((_req, res, next) => {
+    res.removeHeader('X-Frame-Options');
+    res.setHeader('Content-Security-Policy', 'frame-ancestors *');
+    next();
+  });
+
   // Health check for Cloud Run.
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

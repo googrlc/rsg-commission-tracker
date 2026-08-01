@@ -81,6 +81,12 @@ export default function App() {
   const [reconFilter, setReconFilter] = useState<'All' | 'Shorts' | 'Perfect' | 'Excess'>('All');
   const [copiedCarrier, setCopiedCarrier] = useState<string | null>(null);
 
+  // Carrier filter for the Carrier Rules Matrix (look up one carrier's rules, e.g. Liberty Mutual).
+  const [ruleCarrierFilter, setRuleCarrierFilter] = useState<string>('All');
+
+  // Ingestion confirmation banner — proves a save actually landed in Supabase.
+  const [ingestToast, setIngestToast] = useState<{ title: string; detail: string } | null>(null);
+
   // Bulk import states
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkImportText, setBulkImportText] = useState('');
@@ -139,6 +145,7 @@ export default function App() {
   const [policyFormData, setPolicyFormData] = useState<Partial<WonPolicy>>({
     policyNumber: '',
     dateWon: new Date().toISOString().split('T')[0],
+    policyEffectiveDate: '',
     clientName: '',
     carrier: '',
     lineOfBusiness: '',
@@ -187,6 +194,13 @@ export default function App() {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-dismiss the ingestion confirmation after a few seconds (still manually closeable).
+  useEffect(() => {
+    if (!ingestToast) return;
+    const t = setTimeout(() => setIngestToast(null), 8000);
+    return () => clearTimeout(t);
+  }, [ingestToast]);
 
   // Rule Form Submit — writes to Supabase (admin-only, enforced by RLS)
   const handleRuleSubmit = async (e: React.FormEvent) => {
@@ -409,6 +423,7 @@ export default function App() {
       id: `policy-${Date.now()}`,
       policyNumber: policyFormData.policyNumber.trim(),
       dateWon: policyFormData.dateWon || new Date().toISOString().split('T')[0],
+      policyEffectiveDate: policyFormData.policyEffectiveDate || undefined,
       clientName: policyFormData.clientName.trim(),
       carrier: policyFormData.carrier.trim(),
       lineOfBusiness: policyFormData.lineOfBusiness.trim(),
@@ -435,6 +450,7 @@ export default function App() {
       setPolicyFormData({
         policyNumber: '',
         dateWon: new Date().toISOString().split('T')[0],
+        policyEffectiveDate: '',
         clientName: '',
         carrier: '',
         lineOfBusiness: '',
@@ -484,6 +500,18 @@ export default function App() {
       const created = await repo.createReconciliation(draft, policy);
       setReconciliations([created, ...reconciliations]);
       setShowReconForm(false);
+      // Confirm the ingestion actually landed — echo the persisted values so the
+      // user can see the save was taken (created.id proves it hit Supabase).
+      const { expectedAmount } = lookupAndCalculate(policy, rules);
+      const signedReceived = created.transactionType === 'Chargeback' ? -created.receivedAmount : created.receivedAmount;
+      const variance = signedReceived - expectedAmount;
+      const varianceNote = expectedAmount
+        ? ` · expected ${formatCurrencyDecimal(expectedAmount)}, variance ${variance >= 0 ? '+' : ''}${formatCurrencyDecimal(variance)}`
+        : '';
+      setIngestToast({
+        title: `Statement ingested — saved to ledger`,
+        detail: `${created.transactionType} ${formatCurrencyDecimal(created.receivedAmount)} for ${policy.clientName} · ${policy.carrier} · ${created.statementMonth}${varianceNote}`,
+      });
       setReconFormData({
         statementMonth: new Date().toISOString().substring(0, 7),
         policyId: '',
@@ -823,6 +851,14 @@ export default function App() {
   // Summaries Calculations
   const carrierSummaries = calculateCarrierSummaries(policies, reconciliations, rules);
 
+  // Carrier Rules Matrix — distinct carriers for the filter, and the rows to show.
+  // Sorted by carrier (then LOB) so a carrier's rules read together; the dropdown
+  // narrows to one carrier (e.g. Liberty Mutual).
+  const ruleCarriers = ['All', ...Array.from(new Set(rules.map((r) => r.carrier))).sort((a, b) => a.localeCompare(b))];
+  const visibleRules = rules
+    .filter((r) => ruleCarrierFilter === 'All' || r.carrier === ruleCarrierFilter)
+    .sort((a, b) => a.carrier.localeCompare(b.carrier) || a.lineOfBusiness.localeCompare(b.lineOfBusiness));
+
   // Big aggregated metrics
   const totalExpected = policies.reduce((acc, policy) => {
     const { expectedAmount } = lookupAndCalculate(policy, rules);
@@ -959,6 +995,28 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+      {/* Ingestion confirmation — fixed banner proving the save was taken. */}
+      {ingestToast && (
+        <div className="fixed top-4 right-4 z-50 max-w-sm animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="bg-white border border-emerald-200 shadow-lg rounded-xl p-4 flex items-start gap-3">
+            <div className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg shrink-0">
+              <Check className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-900">{ingestToast.title}</p>
+              <p className="text-xs text-slate-600 mt-0.5 break-words">{ingestToast.detail}</p>
+            </div>
+            <button
+              onClick={() => setIngestToast(null)}
+              className="text-slate-400 hover:text-slate-600 shrink-0"
+              aria-label="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Banner and Brand Navbar */}
       <header className="bg-slate-900 text-white border-b border-slate-800 shadow-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
@@ -1025,14 +1083,16 @@ export default function App() {
                 <RefreshCw className="w-3.5 h-3.5" />
                 Refresh
               </button>
-              <button
-                onClick={() => signOut()}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg border border-slate-700 transition flex items-center gap-1.5"
-                title="Sign out"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                Sign out
-              </button>
+              {email && (
+                <button
+                  onClick={() => signOut()}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg border border-slate-700 transition flex items-center gap-1.5"
+                  title="Sign out"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  Sign out
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -2126,6 +2186,18 @@ export default function App() {
                           />
                         </div>
 
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">
+                            Effective Date
+                          </label>
+                          <input
+                            type="date"
+                            value={policyFormData.policyEffectiveDate || ''}
+                            onChange={(e) => setPolicyFormData({ ...policyFormData, policyEffectiveDate: e.target.value })}
+                            className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white text-blue-700 font-mono"
+                          />
+                        </div>
+
                         <div className="md:col-span-2">
                           <label className="block text-xs font-medium text-slate-700 mb-1">
                             Client Name <span className="text-blue-600 font-bold">*</span>
@@ -2397,6 +2469,7 @@ export default function App() {
                       <tr className="bg-slate-100 text-slate-600 uppercase font-mono tracking-wider text-[10px] border-b border-slate-200">
                         <th className="p-3.5 pl-6 font-semibold">Policy #</th>
                         <th className="p-3.5 font-semibold">Date Won</th>
+                        <th className="p-3.5 font-semibold">Eff Date</th>
                         <th className="p-3.5 font-semibold">Client</th>
                         <th className="p-3.5 font-semibold">Carrier</th>
                         <th className="p-3.5 font-semibold">Line of Business</th>
@@ -2430,6 +2503,7 @@ export default function App() {
                             >
                               <td className="p-3.5 pl-6 font-semibold text-slate-800">{policy.policyNumber}</td>
                               <td className="p-3.5 text-slate-500">{policy.dateWon}</td>
+                              <td className="p-3.5 text-slate-500">{policy.policyEffectiveDate || policy.dateWon}</td>
                               <td className="p-3.5 text-slate-800 font-sans font-medium">{policy.clientName}</td>
                               <td className="p-3.5 text-slate-600 font-sans">{policy.carrier}</td>
                               <td className="p-3.5 text-slate-600 font-sans">{policy.lineOfBusiness}</td>
@@ -3105,7 +3179,38 @@ export default function App() {
                 )}
 
                 {rulesSubTab === 'rules' ? (
-                  <div className="overflow-x-auto animate-in fade-in duration-200">
+                  <div className="animate-in fade-in duration-200">
+                    {/* Carrier filter — pull up one carrier's rules (e.g. Liberty Mutual). */}
+                    <div className="px-6 py-3 border-b border-slate-200/70 bg-white flex flex-wrap items-center gap-2">
+                      <Filter className="w-3.5 h-3.5 text-slate-400" />
+                      <label htmlFor="rule-carrier-filter" className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 font-mono">
+                        Carrier
+                      </label>
+                      <select
+                        id="rule-carrier-filter"
+                        value={ruleCarrierFilter}
+                        onChange={(e) => setRuleCarrierFilter(e.target.value)}
+                        className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white text-slate-800 focus:ring-1 focus:ring-blue-500 outline-none max-w-[220px]"
+                      >
+                        {ruleCarriers.map((c) => (
+                          <option key={c} value={c}>{c === 'All' ? 'All carriers' : c}</option>
+                        ))}
+                      </select>
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        {visibleRules.length} rule{visibleRules.length === 1 ? '' : 's'}
+                        {ruleCarrierFilter !== 'All' ? ` · ${ruleCarrierFilter}` : ''}
+                      </span>
+                      {ruleCarrierFilter !== 'All' && (
+                        <button
+                          type="button"
+                          onClick={() => setRuleCarrierFilter('All')}
+                          className="ml-auto text-[11px] text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                        >
+                          <X className="w-3 h-3" /> Clear
+                        </button>
+                      )}
+                    </div>
+                    <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs border-collapse">
                       <thead>
                         <tr className="bg-slate-100 text-slate-600 uppercase font-mono tracking-wider text-[10px] border-b border-slate-200">
@@ -3127,8 +3232,15 @@ export default function App() {
                               No active commission rules entered. Start writing down your carrier rules to generate expected payouts.
                             </td>
                           </tr>
+                        ) : visibleRules.length === 0 ? (
+                          <tr>
+                            <td colSpan={9} className="p-8 text-center text-slate-400 font-sans">
+                              No commission rules for <span className="font-semibold text-slate-600">{ruleCarrierFilter}</span>.{' '}
+                              <button type="button" onClick={() => setRuleCarrierFilter('All')} className="text-blue-600 hover:underline">Show all carriers</button>
+                            </td>
+                          </tr>
                         ) : (
-                          rules.map((rule) => {
+                          visibleRules.map((rule) => {
                             const isExample = rule.notes?.includes('EXAMPLE');
 
                             return (
@@ -3185,6 +3297,7 @@ export default function App() {
                         )}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 ) : (
                   <div className="overflow-x-auto animate-in fade-in duration-200">

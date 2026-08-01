@@ -29,6 +29,11 @@ VITE_SUPABASE_PUBLISHABLE_KEY="sb_publishable_…"
 
 ## Auth
 
+> **Note:** the private (Tailscale) build **auto-signs-in** as a shared allowlisted
+> account and shows no login screen — see *Private deployment* under RSG Ops Notes.
+> Access is still enforced by RLS + the allowlist. Only the public/dev build shows
+> the login gate below.
+
 Login is required before any data renders (Supabase Auth, email magic-link + OTP
 code fallback). Access is restricted to the `app_allowlist` table in Supabase
 (currently Lamar = admin, Gretchen = user; both `@risksolutionsgroup.net`). Add a
@@ -47,17 +52,47 @@ The 6-digit OTP code path works without this.
 
 ## RSG Ops Notes (July 2026)
 
-- **Architecture:** LIVE on **Google Cloud Run** at
-  https://rsg-commission-tracker-339396843209.us-east1.run.app
-  (project `pelagic-bison-486600-j0`, project number `339396843209`, region
-  `us-east1`). An earlier note here claimed a migration to Elestio was underway;
-  that never happened — Cloud Run is the real, current home. Scales to zero, ~free
-  for a two-user internal app.
+- **Architecture (current):** runs **privately on the `hermes-gretch` box**,
+  Docker container `rsg-commission-tracker-tailnet` on `127.0.0.1:3300`, exposed
+  **Tailscale-only** at `https://hermes-gretch.tail1cbc83.ts.net:8446/`
+  (`tailscale serve --https=8446 http://127.0.0.1:3300`). It's embedded as the
+  **Finance** lane of the RSG Master Workspace. The public **Cloud Run** service
+  was **deleted** (2026-07-22) — there is no public URL anymore; the tailnet is
+  the only way in. Data stays protected by Supabase RLS + the allowlist.
   - `npm run build` → static SPA in `dist/` + bundled server `dist/server.cjs`.
-  - `npm start` (`NODE_ENV=production node dist/server.cjs`) serves it on `$PORT`
-    (default 3000).
-  - `Dockerfile` builds both stages; pass `VITE_SUPABASE_URL` and
-    `VITE_SUPABASE_PUBLISHABLE_KEY` as build args.
+  - `Dockerfile` builds both stages; pass `VITE_SUPABASE_URL` +
+    `VITE_SUPABASE_PUBLISHABLE_KEY` (browser-safe) as build args, plus the
+    optional private-build auto-login args below.
+
+### Private deployment — rebuild / rotate the shared login (the ONE command)
+
+The private build **auto-signs-in** as a dedicated shared account
+(`lc-rsg@risksolutionsgroup.net`, on the `app_allowlist`) so the Finance lane
+shows **no login screen** — RLS still enforces access. To rebuild the container
+(after a code change, or to rotate that shared password):
+
+```bash
+ssh hermes 'bash /opt/rsg-commission-tracker/setup-shared-login.sh'
+```
+
+That script (on the box) reads the Supabase service key from
+`/opt/rsg-hermes/.env`, generates a fresh password for the shared account, sets
+it via the GoTrue admin API, **verifies sign-in**, then rebuilds + restarts the
+container. The password is saved to `/opt/rsg-commission-tracker/.autologin-pw`
+(chmod 600) and baked into that private build only. Source lives at
+`/opt/rsg-commission-tracker` (tar'd from this repo — the box can't clone it).
+
+Auto-login is driven by two build args (empty in any public build → normal login
+gate): `VITE_AUTOLOGIN_EMAIL`, `VITE_AUTOLOGIN_PASSWORD`. To rebuild as a
+*different* existing account instead, use the interactive variant:
+`ssh hermes 'bash /opt/rsg-commission-tracker/deploy-tailnet.sh'` (prompts for
+email + password).
+
+### Deploy to Cloud Run (DECOMMISSIONED — kept for history)
+
+> The public Cloud Run service was deleted 2026-07-22 in favour of the private
+> tailnet deployment above. The runbook below is retained only if it ever needs
+> to be recreated.
 
 ### Deploy (the working path — do NOT use `gcloud run deploy --source`)
 

@@ -10,6 +10,13 @@ export default defineConfig(({mode}) => {
   const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || '';
   const supabaseKey =
     env.VITE_SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_PUBLISHABLE_KEY || '';
+  // Optional silent auto-sign-in for the PRIVATE (Tailscale-only) build. Empty in
+  // any public build → the normal login gate shows. process.env fallback covers
+  // Docker ENV / build args. RLS still enforces access via this account.
+  const autologinEmail =
+    env.VITE_AUTOLOGIN_EMAIL || process.env.VITE_AUTOLOGIN_EMAIL || '';
+  const autologinPassword =
+    env.VITE_AUTOLOGIN_PASSWORD || process.env.VITE_AUTOLOGIN_PASSWORD || '';
 
   return {
     plugins: [react(), tailwindcss()],
@@ -17,6 +24,8 @@ export default defineConfig(({mode}) => {
       // Only the publishable key + URL are exposed — both are browser-safe.
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
       'import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY': JSON.stringify(supabaseKey),
+      'import.meta.env.VITE_AUTOLOGIN_EMAIL': JSON.stringify(autologinEmail),
+      'import.meta.env.VITE_AUTOLOGIN_PASSWORD': JSON.stringify(autologinPassword),
     },
     resolve: {
       alias: {

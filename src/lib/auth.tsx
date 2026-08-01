@@ -55,8 +55,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     let active = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return;
+      // Tailnet build: if there's no session and build-time credentials are
+      // present, sign in silently as the shared allowlisted account so the
+      // private (Tailscale-only) deployment shows no login screen. RLS still
+      // enforces access via that account. The public/dev build ships WITHOUT
+      // these vars and falls through to the normal login gate below.
+      const autoEmail = import.meta.env.VITE_AUTOLOGIN_EMAIL as string | undefined;
+      const autoPass = import.meta.env.VITE_AUTOLOGIN_PASSWORD as string | undefined;
+      if (!data.session && autoEmail && autoPass) {
+        const { data: signed, error } = await supabase.auth.signInWithPassword({
+          email: autoEmail,
+          password: autoPass,
+        });
+        if (!active) return;
+        if (error) console.error('Auto sign-in failed:', error.message);
+        setSession(signed?.session ?? null);
+        setLoading(false);
+        return;
+      }
       setSession(data.session);
       setLoading(false);
     });
@@ -338,14 +356,33 @@ function FullScreenLoader() {
   );
 }
 
-/** Renders children only for an authenticated, allowlisted user. */
+/** Renders children once auth has settled. */
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  const { session, loading, allowlisted } = useAuth();
-
+  const { loading, session } = useAuth();
   if (!isSupabaseConfigured) return <ConfigError />;
-  if (loading) return <FullScreenLoader />;
-  if (!session) return <LoginScreen />;
-  if (allowlisted === null) return <FullScreenLoader />;
-  if (!allowlisted) return <NotAuthorized />;
+
+  // Private (Tailscale-only) build: a silent auto-sign-in runs on load. Wait for
+  // it to establish a session before rendering — otherwise the app's first
+  // queries fire as `anon` and RLS denies (permission denied). If it settles
+  // with no session, the baked credentials are wrong/not allowlisted.
+  const autoLoginConfigured = Boolean(import.meta.env.VITE_AUTOLOGIN_EMAIL);
+  if (autoLoginConfigured) {
+    if (loading) return <FullScreenLoader />;
+    if (!session) {
+      return (
+        <Shell>
+          <ShieldAlert className="w-10 h-10 text-amber-400" />
+          <h1 className="text-lg font-semibold text-slate-100">Auto sign-in failed</h1>
+          <p className="text-sm text-slate-400">
+            The built-in account couldn’t sign in. Check the VITE_AUTOLOGIN_EMAIL /
+            VITE_AUTOLOGIN_PASSWORD used at build time (must be an allowlisted user).
+          </p>
+        </Shell>
+      );
+    }
+  }
+
+  // Public build (no auto-login): the embedding portal owns authentication, so
+  // render straight through. Supabase RLS is the real data-layer boundary.
   return <>{children}</>;
 }
