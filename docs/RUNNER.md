@@ -13,9 +13,9 @@ a statement but a person, by name.**
 | 2:20 | `hermes --sync-canonical-book` | rsg-hermes | NowCerts → `canonical_clients` / `canonical_policies`. Upsert by GUID, never deletes. **This is the new-business + renewal pull.** |
 | 2:25 | `hermes --sync-commissions` | rsg-hermes | Book → `commission_ledger` EXPECTED side. Preserves statement-sourced actuals. |
 | 2:30 | `hermes --renewal-refresh` | rsg-hermes | Rebuilds renewal candidates from the same book. |
-| 2:40 | `rsg-finance-jobs --poll-inbox` | **this repo** | Stages every new statement in the Nextcloud drop folder. |
-| 2:50 | `rsg-finance-jobs --reconcile` | **this repo** | Links orphaned statement lines, then re-derives actual/status for every affected ledger row. |
-| 6:00 | `rsg-finance-jobs --watchdog` | **this repo** | Checks the chain above actually ran and that coverage still balances. Alerts `#systems-check` only on a problem. |
+| 2:40 | `hermes --commission-inbox` | rsg-hermes (mirrored) | Stages every new statement in the Nextcloud drop folder. |
+| 2:50 | `hermes --commission-reconcile` | rsg-hermes (mirrored) | Links orphaned statement lines, then re-derives actual/status for every affected ledger row. |
+| 6:00 | `hermes --commission-watchdog` | rsg-hermes (mirrored) | Checks the chain above actually ran and that coverage still balances. Alerts `#systems-check` only on a problem. |
 
 The first three already existed and work — `canonical_policies` and the ledger
 were both refreshed by them this morning. The last three are what this repo
@@ -44,18 +44,30 @@ correctness.
 
 ## Running the jobs
 
+**On the box** (this is what cron calls, and how the jobs were verified live):
+
+```bash
+ssh hermes
+cd /opt/rsg-hermes
+docker compose run --rm hermes hermes --commission-watchdog
+docker compose run --rm hermes hermes --commission-inbox --commission-runner-dry-run
+docker compose run --rm hermes hermes --commission-reconcile --commission-runner-dry-run
+```
+
+**From this repo** (same code, split-app namespace):
+
 ```bash
 cd backend
 pip install -e '.[dev]'
-
 rsg-finance-jobs --watchdog                 # read-only; exits 1 if it finds a problem
 rsg-finance-jobs --poll-inbox --dry-run     # lists what it would stage, downloads nothing
 rsg-finance-jobs --reconcile --dry-run      # reports every status change without writing
-rsg-finance-jobs --reconcile --watchdog --json
 ```
 
-Every job takes `--dry-run`. The watchdog exits non-zero on a problem so a
-supervisor notices even if Slack doesn't.
+Every job takes a dry-run flag (`--commission-runner-dry-run` on the box,
+`--dry-run` here). The watchdog exits non-zero on a problem so a supervisor
+notices even if Slack doesn't — and note it *does* post to Slack unless you pass
+the dry-run flag, since alerting is the job.
 
 ### Environment
 
@@ -153,35 +165,50 @@ send you to different places.
 
 ## Deploying this
 
-**Production currently serves `rsg-hermes`'s copy of this code, not this repo's.**
-The running `rsg-hermes-finance` container is built from `/opt/rsg-hermes` and
-imports `hermes/commissions/{statements,matching,reconcile,surface}.py` — the
-same modules that were copied here as `backend/hermes_finance/`. Until that is
-resolved, a change made here is not live.
+**Production serves `rsg-hermes`'s copy of this code, not this repo's.** The
+`rsg-hermes-finance` container is built from `/opt/rsg-hermes` and imports
+`hermes/commissions/` — the same modules that live here as
+`backend/hermes_finance/`. The two are kept in step by hand; the only namespace
+difference is `hermes_finance.X` ↔ `hermes.commissions.X`.
 
-Two ways forward, and the choice is a real one:
+So a change here is **not live** until it is mirrored, committed to rsg-hermes,
+and both images are rebuilt on the box:
 
-1. **Mirror into rsg-hermes** (what the split intended, short term): copy the
-   changed modules into `hermes/commissions/`, add `pymupdf` to its pyproject,
-   register the `jobs` CLI, rebuild `hermes-finance`. Keeps one deployment;
-   keeps two copies of the code.
-2. **Deploy this repo's `backend/Dockerfile`** as the finance service and point
-   the compose file at it. One copy of the code; a second image to build.
+```bash
+ssh hermes
+cd /opt/rsg-hermes && git fetch origin && git reset --hard origin/main
+docker compose build hermes                      # the image cron runs
+docker compose -f docker-compose.yml -f docker-compose.services.yml \
+  --profile services up -d --build hermes-finance # the API on :8801
+```
 
-Whichever is chosen, the cron lines are:
+Both are needed: the API serves the UI, and `docker compose run --rm hermes` —
+what every cron line uses — runs from a *different* image that must be rebuilt
+separately. Rebuilding only one is the easy mistake.
+
+### Cron (not yet enabled)
 
 ```cron
 # Commission statement inbox — stage new drops (never commits) 2:40am ET
-40 2 * * * cd /opt/rsg-commission-tracker && docker compose run --rm finance-jobs rsg-finance-jobs --poll-inbox >> /root/hermes-cron.log 2>&1
+40 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --commission-inbox >> /root/hermes-cron.log 2>&1
 # Commission reconcile — link orphan lines, re-derive status 2:50am ET
-50 2 * * * cd /opt/rsg-commission-tracker && docker compose run --rm finance-jobs rsg-finance-jobs --reconcile >> /root/hermes-cron.log 2>&1
+50 2 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --commission-reconcile >> /root/hermes-cron.log 2>&1
 # Commission pipeline watchdog — alerts #systems-check only on a problem, 6:00am ET
-0 6 * * * cd /opt/rsg-commission-tracker && docker compose run --rm finance-jobs rsg-finance-jobs --watchdog >> /root/hermes-cron.log 2>&1
+0 6 * * * cd /opt/rsg-hermes && docker compose run --rm hermes hermes --commission-watchdog >> /root/hermes-cron.log 2>&1
 ```
 
-Run each once by hand with `--dry-run` before enabling the cron line. That is
-the same go-live discipline the book sync used, and the reason it went in
-cleanly.
+Run each once by hand with `--commission-runner-dry-run` before enabling the
+line. That is the same go-live discipline the book sync used, and the reason it
+went in cleanly.
+
+### The UI
+
+`/opt/rsg-commission-tracker` is a tarball of this repo (the box cannot clone
+it), rebuilt with `bash /opt/rsg-commission-tracker/setup-shared-login.sh`. That
+script passes `FINANCE_API_URL=http://172.17.0.1:8801` — the docker bridge
+gateway, because the tracker sits on the default bridge while the finance
+service publishes 8801 on the host. Without it the app defaults to
+`127.0.0.1:8801`, which inside a container is the container itself.
 
 ### The UI's proxy
 
