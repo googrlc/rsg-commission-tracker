@@ -854,7 +854,7 @@ export default function App() {
   // Carrier Rules Matrix — distinct carriers for the filter, and the rows to show.
   // Sorted by carrier (then LOB) so a carrier's rules read together; the dropdown
   // narrows to one carrier (e.g. Liberty Mutual).
-  const ruleCarriers = ['All', ...Array.from(new Set(rules.map((r) => r.carrier))).sort((a, b) => a.localeCompare(b))];
+  const ruleCarriers = ['All', ...Array.from(new Set<string>(rules.map((r) => r.carrier))).sort((a, b) => a.localeCompare(b))];
   const visibleRules = rules
     .filter((r) => ruleCarrierFilter === 'All' || r.carrier === ruleCarrierFilter)
     .sort((a, b) => a.carrier.localeCompare(b.carrier) || a.lineOfBusiness.localeCompare(b.lineOfBusiness));

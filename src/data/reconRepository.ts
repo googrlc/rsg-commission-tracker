@@ -9,7 +9,6 @@
  */
 
 import { supabase } from '../lib/supabase';
-import type { ParseResult } from '../parsers/types';
 import type {
   ReconException, ReconSummary, CommissionTxn, LossOnCancel,
   CommByLineRow, CommByCarrierRow, NbVsRenewalRow, SegmentRow, MonthlyTrendRow, FeeDragRow,
@@ -328,51 +327,15 @@ export async function fetchAliasMap(): Promise<CarrierAlias[]> {
   }));
 }
 
-// --- Upload + reconcile (Slice 2) ------------------------------------------
-
-export interface UploadOutcome {
-  statementId: string;
-  rowCount: number;
-  reconcileSummary: unknown;
-}
-
-/** Insert parsed statement header + transactions, then reconcile the carrier. */
-export async function uploadParsedStatement(
-  result: ParseResult, uploadedBy: string | null,
-): Promise<UploadOutcome> {
-  const h = result.header;
-  // Idempotent: drop a prior load of the same file (cascade -> transactions).
-  await supabase.from('commission_statements').delete().eq('source_filename', h.source_filename);
-
-  const { data: stmt, error: hErr } = await supabase
-    .from('commission_statements')
-    .insert({
-      carrier_name: h.carrier_name,
-      statement_period_start: h.statement_period_start,
-      statement_period_end: h.statement_period_end,
-      source_filename: h.source_filename,
-      source_format: h.source_format,
-      carrier_stated_total_premium: h.carrier_stated_total_premium,
-      carrier_stated_total_commission: h.carrier_stated_total_commission,
-      carrier_stated_net_due: h.carrier_stated_net_due,
-      row_count: h.row_count,
-      upload_status: 'parsed',
-      uploaded_by: uploadedBy,
-    })
-    .select('id')
-    .single();
-  if (hErr) fail('Save statement header', hErr);
-  const statementId = (stmt as { id: string }).id;
-
-  const rows = result.transactions.map((t) => ({ statement_id: statementId, carrier_name: h.carrier_name, ...t }));
-  // chunk inserts to keep payloads reasonable
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await supabase.from('commission_transactions').insert(rows.slice(i, i + 500));
-    if (error) fail('Save transactions', error);
-  }
-
-  const { data: summary, error: rErr } = await supabase.rpc('reconcile_carrier', { p_canonical: h.carrier_name });
-  if (rErr) fail('Reconcile', rErr);
-
-  return { statementId, rowCount: rows.length, reconcileSummary: summary };
-}
+// --- Upload + reconcile ------------------------------------------------------
+//
+// The browser used to parse a statement here and insert commission_statements +
+// commission_transactions directly, then call the reconcile_carrier RPC. That
+// path is gone. It had no staging, no content-hash dedupe and no named
+// approver, and it ran a different reconciler than the service does — so the
+// same file loaded twice could double-count, and two writers disagreed about
+// what a row's status meant.
+//
+// Statement writes now go through src/data/financeApi.ts -> the commission
+// service, which stages a batch and commits only on an explicit approval.
+// Everything above this line is a READ and still goes straight to Supabase.
