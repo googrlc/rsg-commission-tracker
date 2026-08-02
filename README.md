@@ -5,14 +5,28 @@ policies, and reconcile carrier payments to catch shorts before feeding
 QuickBooks. Phase 1 of the **Commission Command** build spec
 (`docs/COMMISSION_COMMAND_BUILD_SPEC.md`).
 
+Two toolchains, one app:
+
+- the **UI** at the repo root (Vite/React/TS) — reads Supabase directly under RLS;
+- the **commission service** in [`backend/`](backend/README.md) (Python/FastAPI,
+  :8801) — owns every statement WRITE, behind a staging + named-approval gate;
+- the **runner** ([`docs/RUNNER.md`](docs/RUNNER.md)) — pulls new business and
+  renewals nightly, stages statements that arrive on their own, re-derives
+  reconciliation status on a clock, and complains when the chain stops.
+
 ## Run locally
 
-**Prerequisites:** Node.js 22+
+**Prerequisites:** Node.js 22+ and Python 3.11+
 
 1. `npm install`
 2. Copy `.env.example` → `.env.local` and set the Supabase values (see below).
 3. `npm run dev` — runs the Express + Vite dev server on http://localhost:3000
    (`npm run dev:vite` for the plain Vite server).
+4. `cd backend && pip install -e '.[dev]' && rsg-finance-api` — the commission
+   service on :8801. The UI proxies `/api/finance/*` to it (override with
+   `FINANCE_API_URL`). Without it, reports still render; **statement uploads
+   will not work**, by design — there is no longer a browser path that writes
+   money.
 
 ## Configuration (Supabase)
 

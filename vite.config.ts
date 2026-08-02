@@ -38,6 +38,16 @@ export default defineConfig(({mode}) => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      // Statement writes go to the commission service (backend/), never straight
+      // to Supabase. Proxying keeps it same-origin: no CORS, and the API is not
+      // a separate address anyone has to reach or secure.
+      proxy: {
+        '/api/finance': {
+          target: env.FINANCE_API_URL || 'http://127.0.0.1:8801',
+          changeOrigin: true,
+          rewrite: (p: string) => p.replace(/^\/api\/finance/, ''),
+        },
+      },
     },
   };
 });
