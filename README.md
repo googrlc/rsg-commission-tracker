@@ -102,6 +102,35 @@ gate): `VITE_AUTOLOGIN_EMAIL`, `VITE_AUTOLOGIN_PASSWORD`. To rebuild as a
 `ssh hermes 'bash /opt/rsg-commission-tracker/deploy-tailnet.sh'` (prompts for
 email + password).
 
+### Shipping a code change (without rotating the login)
+
+`setup-shared-login.sh` mints a **fresh password on every run** — right when you
+mean to rotate, wrong when all you changed is code. For a code-only deploy use:
+
+```bash
+ssh hermes 'cd /opt/rsg-commission-tracker && ./rebuild.sh'
+```
+
+It reuses the password already in `.autologin-pw`, and **verifies that it still
+signs in before swapping the container** — so a stale password fails at the build
+instead of showing up as a login screen in the Finance lane. Sync the source
+first (the box can't clone this repo):
+
+```bash
+tar czf - --exclude=.git --exclude=node_modules --exclude=dist . \
+  | ssh hermes 'tar xzf - -C /opt/rsg-commission-tracker'
+```
+
+### The public deployment is gone (2026-08-02)
+
+Beyond Cloud Run, the box's own public endpoint was retired too: the nginx vhost
+on `:18445` and the `rsg-commission-tracker` container on `:3100`. It had been
+serving a 2026-07-10 image with no `/api/finance` proxy, so every statement call
+there fell through to the SPA catch-all and returned `index.html` with HTTP 200 —
+which the client parsed as `null` and rendered as a screen that never loaded.
+Backups of the vhost and container spec are in `/root/retired-public-tracker/`.
+**`:8446` is the only tracker.**
+
 ### Deploy to Cloud Run (DECOMMISSIONED — kept for history)
 
 > The public Cloud Run service was deleted 2026-07-22 in favour of the private
