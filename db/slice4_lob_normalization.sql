@@ -50,13 +50,23 @@ insert into public.lob_alias_map (raw_lob, canonical_lob, segment) values
   ('pa',                        'Personal Auto',          'personal'),
   ('ho',                        'Homeowners',             'personal'),
   ('homeowners',                'Homeowners',             'personal'),
-  ('home',                      'Homeowners',             'personal')
+  ('home',                      'Homeowners',             'personal'),
+  -- The apostrophe variants are what the ledger actually holds today (all 4 WC
+  -- rows read "Worker's Compensation" while the rulebook says "Workers Comp").
+  -- Without these the WC rule matches nothing and those rows price at NULL.
+  ('worker''s compensation',    'Workers Comp',           'commercial'),
+  ('worker''s comp',            'Workers Comp',           'commercial'),
+  ('workers'' compensation',    'Workers Comp',           'commercial'),
+  ('workers'' comp',            'Workers Comp',           'commercial')
 on conflict (raw_lob) do nothing;
 
 -- ── v_comm_by_line: rewired through the map ─────────────────────────────────
 -- Unmapped lobs fall back to their raw (uppercased) label so they stay VISIBLE
 -- for cleanup rather than collapsing into one bucket. is_mapped flags the gap.
-create or replace view public.v_comm_by_line with (security_invoker = true) as
+-- Dropped, not replaced: v_comm_by_line already existed without is_mapped, and
+-- `create or replace view` cannot add a column in the middle (42P16).
+drop view if exists public.v_comm_by_line;
+create view public.v_comm_by_line with (security_invoker = true) as
 select
   coalesce(m.canonical_lob, upper(trim(t.lob)), '(no lob)') as lob,
   (m.canonical_lob is not null)                             as is_mapped,
@@ -76,7 +86,8 @@ grant select on public.v_comm_by_line to authenticated, service_role;
 -- ── v_lob_unmapped: the cleanup worklist ────────────────────────────────────
 -- Every raw lob seen in the data that has no map row yet, ranked by dollars so
 -- you fix the ones that move the numbers first.
-create or replace view public.v_lob_unmapped with (security_invoker = true) as
+drop view if exists public.v_lob_unmapped;
+create view public.v_lob_unmapped with (security_invoker = true) as
 select
   lower(trim(t.lob))                          as raw_lob,
   count(*)                                     as txn_count,
