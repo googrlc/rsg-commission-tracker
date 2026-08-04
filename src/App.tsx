@@ -1064,7 +1064,7 @@ export default function App() {
               <button
                 onClick={() => setActiveTab('workspace')}
                 className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg border border-blue-500 transition flex items-center gap-1.5"
-                title="Statement reconciliation workspace (uploaded carrier statements)"
+                title="Upload carrier statements and work the reconciliation queue"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
                 Commission Workspace
