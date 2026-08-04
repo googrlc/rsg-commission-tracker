@@ -10,12 +10,17 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Wrench, AlertTriangle, TrendingDown, Search } from 'lucide-react';
+import { X, Wrench, AlertTriangle, TrendingDown, Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import type { ReconException, ReconSummary, CommissionTxn, LossOnCancel } from '../../types';
 import * as recon from '../../data/reconRepository';
 import { Card, Spinner, ErrorNote, StatusBadge, DeltaMoney, formatCurrencyDecimal, monthLabel } from './shared';
 
 type Bucket = 'priced_matched' | 'no_expected' | 'unmatched' | 'missing' | null;
+type SortKey = 'delta' | 'carrier';
+type SortDir = 'asc' | 'desc';
+
+const PAGE_SIZE = 25;
+
 const BUCKET_STATUSES: Record<string, string[]> = {
   priced_matched: ['underpaid', 'overpaid'],
   no_expected: ['no_expected'],
@@ -38,6 +43,9 @@ export default function ReconciliationWorkspace({
   const [carrier, setCarrier] = useState('All');
   const [search, setSearch] = useState('');
   const [month, setMonth] = useState<number | 'all'>('all');
+  const [sortKey, setSortKey] = useState<SortKey>('carrier');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [page, setPage] = useState(1);
   const [churnBy, setChurnBy] = useState<'client' | 'carrier'>('client');
 
   const [selected, setSelected] = useState<ReconException | null>(null);
@@ -88,20 +96,52 @@ export default function ReconciliationWorkspace({
   const filtered = useMemo(() => {
     const allow = bucket ? new Set(BUCKET_STATUSES[bucket]) : null;
     const q = search.trim().toLowerCase();
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const byDelta = (a: ReconException, b: ReconException) => {
+      // shorts first: most-negative delta on top, null deltas last
+      const da = a.delta, db = b.delta;
+      if (da == null && db == null) return 0;
+      if (da == null) return 1;
+      if (db == null) return -1;
+      return da - db;
+    };
+    const byCarrier = (a: ReconException, b: ReconException) =>
+      a.carrierName.localeCompare(b.carrierName) * dir;
+
     return rows
       .filter((r) => (!allow || allow.has(r.reconciliationStatus)))
       .filter((r) => (carrier === 'All' || r.carrierName === carrier))
       .filter((r) => month === 'all' || (r.policyNumber != null && policyToMonths.get(r.policyNumber)?.has(month)))
       .filter((r) => !q || (r.clientName ?? '').toLowerCase().includes(q) || (r.policyNumber ?? '').toLowerCase().includes(q))
-      // shorts first: most-negative delta on top, null deltas last
       .sort((a, b) => {
-        const da = a.delta, db = b.delta;
-        if (da == null && db == null) return 0;
-        if (da == null) return 1;
-        if (db == null) return -1;
-        return da - db;
+        if (sortKey === 'carrier') {
+          const c = byCarrier(a, b);
+          return c !== 0 ? c : byDelta(a, b);
+        }
+        const d = byDelta(a, b);
+        // When sorting by shortfall, still group carriers stably.
+        return d !== 0 ? d : a.carrierName.localeCompare(b.carrierName);
       });
-  }, [rows, bucket, carrier, search, month, policyToMonths]);
+  }, [rows, bucket, carrier, search, month, policyToMonths, sortKey, sortDir]);
+
+  // Reset to page 1 whenever the working set changes.
+  useEffect(() => { setPage(1); }, [bucket, carrier, search, month, sortKey, sortDir, rows.length]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pageRows = useMemo(() => {
+    const start = (safePage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, safePage]);
+
+  const toggleCarrierSort = () => {
+    if (sortKey !== 'carrier') {
+      setSortKey('carrier');
+      setSortDir('asc');
+      return;
+    }
+    setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+  };
 
   const openPolicy = async (r: ReconException) => {
     setSelected(r); setTxns(null);
@@ -164,9 +204,9 @@ export default function ReconciliationWorkspace({
       {/* Exception queue */}
       <Card
         title="Exception queue"
-        subtitle={`${filtered.length} rows${bucket ? ' · filtered' : ''}${month !== 'all' ? ` · ${monthLabel(month)}` : ''} · shorts on top (red = chase it, amber = fix the rule)`}
+        subtitle={`${filtered.length} rows${bucket ? ' · filtered' : ''}${month !== 'all' ? ` · ${monthLabel(month)}` : ''} · sorted by ${sortKey === 'carrier' ? `carrier ${sortDir === 'asc' ? 'A→Z' : 'Z→A'}` : 'shortfall'} · ${PAGE_SIZE}/page`}
         right={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 justify-end">
             <div className="flex items-center gap-1.5 border border-slate-300 rounded-lg px-2 py-1">
               <Search className="w-3.5 h-3.5 text-slate-400" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="client / policy"
@@ -183,6 +223,21 @@ export default function ReconciliationWorkspace({
               className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
               {carriers.map((c) => <option key={c}>{c}</option>)}
             </select>
+            <select
+              value={sortKey === 'carrier' ? `carrier_${sortDir}` : 'delta'}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === 'delta') { setSortKey('delta'); setSortDir('asc'); }
+                else if (v === 'carrier_asc') { setSortKey('carrier'); setSortDir('asc'); }
+                else { setSortKey('carrier'); setSortDir('desc'); }
+              }}
+              title="Sort the exception queue"
+              className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white"
+            >
+              <option value="carrier_asc">Sort: Carrier A→Z</option>
+              <option value="carrier_desc">Sort: Carrier Z→A</option>
+              <option value="delta">Sort: Shortfall first</option>
+            </select>
             {bucket && (
               <button onClick={() => setBucket(null)} className="text-[11px] text-blue-600 hover:underline">clear</button>
             )}
@@ -194,7 +249,19 @@ export default function ReconciliationWorkspace({
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
                 <th className="text-left font-medium py-2 px-2">Client</th>
-                <th className="text-left font-medium px-2">Carrier</th>
+                <th className="text-left font-medium px-2">
+                  <button
+                    type="button"
+                    onClick={toggleCarrierSort}
+                    className={`inline-flex items-center gap-1 hover:text-slate-700 ${sortKey === 'carrier' ? 'text-slate-700' : ''}`}
+                    title="Sort by carrier"
+                  >
+                    Carrier
+                    {sortKey !== 'carrier' && <ArrowUpDown className="w-3 h-3 opacity-50" />}
+                    {sortKey === 'carrier' && sortDir === 'asc' && <ArrowUp className="w-3 h-3" />}
+                    {sortKey === 'carrier' && sortDir === 'desc' && <ArrowDown className="w-3 h-3" />}
+                  </button>
+                </th>
                 <th className="text-left font-medium px-2">Policy #</th>
                 <th className="text-left font-medium px-2">LOB</th>
                 <th className="text-left font-medium px-2">Type</th>
@@ -203,7 +270,17 @@ export default function ReconciliationWorkspace({
                 <th className="text-left font-medium px-2">Exp. pay</th>
                 <th className="text-right font-medium px-2">Expected</th>
                 <th className="text-right font-medium px-2">Actual</th>
-                <th className="text-right font-medium px-2">Delta</th>
+                <th className="text-right font-medium px-2">
+                  <button
+                    type="button"
+                    onClick={() => { setSortKey('delta'); setSortDir('asc'); }}
+                    className={`inline-flex items-center gap-1 hover:text-slate-700 ${sortKey === 'delta' ? 'text-slate-700' : ''}`}
+                    title="Sort by shortfall (most negative first)"
+                  >
+                    Delta
+                    {sortKey === 'delta' ? <ArrowDown className="w-3 h-3" /> : <ArrowUpDown className="w-3 h-3 opacity-50" />}
+                  </button>
+                </th>
                 <th className="text-left font-medium px-2">Status</th>
                 <th className="px-2"></th>
               </tr>
@@ -212,8 +289,8 @@ export default function ReconciliationWorkspace({
               {filtered.length === 0 && (
                 <tr><td colSpan={13} className="text-center text-slate-400 py-6">No rows for this filter.</td></tr>
               )}
-              {filtered.map((r, i) => (
-                <tr key={`${r.carrierName}-${r.policyNumber}-${i}`}
+              {pageRows.map((r, i) => (
+                <tr key={`${r.carrierName}-${r.policyNumber}-${(safePage - 1) * PAGE_SIZE + i}`}
                   onClick={() => openPolicy(r)}
                   className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer">
                   <td className="py-2 px-2 font-medium text-slate-800 max-w-[160px] truncate">{r.clientName ?? '—'}</td>
@@ -248,6 +325,35 @@ export default function ReconciliationWorkspace({
             </tbody>
           </table>
         </div>
+
+        {filtered.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-slate-100">
+            <div className="text-[11px] text-slate-500 font-mono">
+              {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={safePage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg border border-slate-300 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" /> Prev
+              </button>
+              <span className="text-[11px] font-mono text-slate-600 px-1">
+                Page {safePage} / {pageCount}
+              </span>
+              <button
+                type="button"
+                disabled={safePage >= pageCount}
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg border border-slate-300 bg-white text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50"
+              >
+                Next <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Churn / loss-on-cancel */}
