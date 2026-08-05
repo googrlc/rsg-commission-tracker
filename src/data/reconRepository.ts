@@ -47,32 +47,88 @@ export async function fetchReconSummary(): Promise<ReconSummary> {
   };
 }
 
-export async function fetchReconExceptions(): Promise<ReconException[]> {
+/** Earliest cancel/chargeback statement date per policy_number.
+ * Used until v_reconciliation_exceptions.cancel_date is applied (slice8). */
+async function fetchStatementCancelDates(): Promise<Map<string, string>> {
   const { data, error } = await supabase
+    .from('commission_transactions')
+    .select('policy_number, transaction_date, transaction_type')
+    .in('transaction_type', ['cancel', 'chargeback'])
+    .not('policy_number', 'is', null)
+    .not('transaction_date', 'is', null);
+  if (error) fail('Load statement cancel dates', error);
+  const earliest = new Map<string, string>();
+  for (const r of data ?? []) {
+    const pn = String((r as { policy_number?: string }).policy_number ?? '');
+    const d = String((r as { transaction_date?: string }).transaction_date ?? '');
+    if (!pn || !d) continue;
+    const prev = earliest.get(pn);
+    if (!prev || d < prev) earliest.set(pn, d);
+  }
+  return earliest;
+}
+
+function midTerm(cancelDate: string | null, expirationDate: string | null): boolean {
+  if (!cancelDate) return false;
+  if (!expirationDate) return true;
+  return cancelDate < expirationDate;
+}
+
+export async function fetchReconExceptions(): Promise<ReconException[]> {
+  // Prefer slice8 columns when the migration is applied; fall back if missing.
+  const withCancel = await supabase
     .from('v_reconciliation_exceptions')
-    .select('exception_type, reconciliation_status, carrier_name, policy_number, client_name, lob, expected_commission, actual_commission, delta, effective_date, expiration_date, term_months, expected_pay_month, pay_basis, term_type, new_count, renewal_count, endorsement_count, cancel_count');
-  if (error) fail('Load exceptions', error);
-  return (data ?? []).map((r: Record<string, unknown>) => ({
-    exceptionType: r.exception_type as ReconException['exceptionType'],
-    reconciliationStatus: r.reconciliation_status as ReconException['reconciliationStatus'],
-    carrierName: (r.carrier_name as string) ?? '',
-    policyNumber: (r.policy_number as string) ?? null,
-    clientName: (r.client_name as string) ?? null,
-    lob: (r.lob as string) ?? null,
-    expectedCommission: n(r.expected_commission),
-    actualCommission: n(r.actual_commission),
-    delta: n(r.delta),
-    effectiveDate: (r.effective_date as string) ?? null,
-    expirationDate: (r.expiration_date as string) ?? null,
-    termMonths: n(r.term_months),
-    expectedPayMonth: n(r.expected_pay_month),
-    payBasis: (r.pay_basis as string) ?? null,
-    termType: (r.term_type as ReconException['termType']) ?? null,
-    newCount: n(r.new_count) ?? 0,
-    renewalCount: n(r.renewal_count) ?? 0,
-    endorsementCount: n(r.endorsement_count) ?? 0,
-    cancelCount: n(r.cancel_count) ?? 0,
-  }));
+    .select('exception_type, reconciliation_status, carrier_name, policy_number, client_name, lob, expected_commission, actual_commission, delta, effective_date, expiration_date, term_months, expected_pay_month, pay_basis, term_type, new_count, renewal_count, endorsement_count, cancel_count, cancel_date, is_mid_term_cancel');
+
+  let rows: Record<string, unknown>[] = [];
+  let haveViewCancel = false;
+  if (withCancel.error) {
+    const { data, error } = await supabase
+      .from('v_reconciliation_exceptions')
+      .select('exception_type, reconciliation_status, carrier_name, policy_number, client_name, lob, expected_commission, actual_commission, delta, effective_date, expiration_date, term_months, expected_pay_month, pay_basis, term_type, new_count, renewal_count, endorsement_count, cancel_count');
+    if (error) fail('Load exceptions', error);
+    rows = (data ?? []) as Record<string, unknown>[];
+  } else {
+    rows = (withCancel.data ?? []) as Record<string, unknown>[];
+    haveViewCancel = true;
+  }
+
+  const statementCancels = haveViewCancel ? null : await fetchStatementCancelDates();
+
+  return rows.map((r) => {
+    const expirationDate = (r.expiration_date as string) ?? null;
+    const fromView = (r.cancel_date as string) ?? null;
+    const fromStmt = r.policy_number && statementCancels
+      ? statementCancels.get(String(r.policy_number)) ?? null
+      : null;
+    const cancelDate = fromView ?? fromStmt;
+    const isMid = typeof r.is_mid_term_cancel === 'boolean'
+      ? r.is_mid_term_cancel
+      : midTerm(cancelDate, expirationDate);
+    return {
+      exceptionType: r.exception_type as ReconException['exceptionType'],
+      reconciliationStatus: r.reconciliation_status as ReconException['reconciliationStatus'],
+      carrierName: (r.carrier_name as string) ?? '',
+      policyNumber: (r.policy_number as string) ?? null,
+      clientName: (r.client_name as string) ?? null,
+      lob: (r.lob as string) ?? null,
+      expectedCommission: n(r.expected_commission),
+      actualCommission: n(r.actual_commission),
+      delta: n(r.delta),
+      effectiveDate: (r.effective_date as string) ?? null,
+      expirationDate,
+      termMonths: n(r.term_months),
+      expectedPayMonth: n(r.expected_pay_month),
+      payBasis: (r.pay_basis as string) ?? null,
+      cancelDate,
+      isMidTermCancel: isMid,
+      termType: (r.term_type as ReconException['termType']) ?? null,
+      newCount: n(r.new_count) ?? 0,
+      renewalCount: n(r.renewal_count) ?? 0,
+      endorsementCount: n(r.endorsement_count) ?? 0,
+      cancelCount: n(r.cancel_count) ?? 0,
+    };
+  });
 }
 
 export async function fetchPolicyTransactions(
