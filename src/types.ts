@@ -37,6 +37,10 @@ export interface WonPolicy {
   payrollAmount?: number;
   numberOfEmployees?: number;
   adminFeeAmount?: number;        // for complex "% of Admin Fee" matching
+  /** Fee RSG charges the insured (NowCerts agencyFee). Distinct from carrier commission. */
+  agencyFeeAmount?: number;
+  /** AMS billing: Direct Bill | Agency Bill | * 100. */
+  billingType?: string;
   monthlyPremiumAmount?: number;  // for complex "% of Monthly Premium" matching
   paymentTiming?: 'As Earned' | 'In Advance'; // Overrides rule timing if provided
   manualExpectedAmount?: number;

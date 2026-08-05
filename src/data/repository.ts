@@ -34,6 +34,9 @@ import {
 const RULE_COLS =
   'id, lob, carrier_name, commission_method, nb_percent, renewal_percent, flat_fee, commission_basis, mga_name, state, notes, lookup_priority';
 const LEDGER_COLS =
+  'id, policy_number, nowcerts_policy_id, carrier_name, lob, client_name, statement_date, policy_effective_date, is_renewal, gross_premium, ee_count, expected_commission, commission_rule_id, commission_basis, reconciliation_status, statement_source, notes, payroll_amount, admin_fee_amount, agency_fee_amount, billing_type, monthly_premium_amount, payment_timing';
+// Pre-migration DBs lack billing_type / agency_fee_amount — fall back so the SPA still loads.
+const LEDGER_COLS_FALLBACK =
   'id, policy_number, nowcerts_policy_id, carrier_name, lob, client_name, statement_date, policy_effective_date, is_renewal, gross_premium, ee_count, expected_commission, commission_rule_id, commission_basis, reconciliation_status, statement_source, notes, payroll_amount, admin_fee_amount, monthly_premium_amount, payment_timing';
 const RECON_COLS =
   'id, ledger_id, policy_number, carrier_name, client_name, statement_date, actual_commission, discrepancy_type, resolution_notes';
@@ -50,6 +53,23 @@ export interface AllData {
   reconciliations: ReconciliationStatement[];
 }
 
+async function selectLedger() {
+  const full = await supabase
+    .from('commission_ledger')
+    .select(LEDGER_COLS)
+    .order('statement_date', { ascending: false });
+  if (!full.error) return full;
+  // Missing billing/fee columns until slice9 / hermes migration is applied.
+  const msg = (full.error.message || '').toLowerCase();
+  if (msg.includes('billing_type') || msg.includes('agency_fee_amount') || msg.includes('column')) {
+    return supabase
+      .from('commission_ledger')
+      .select(LEDGER_COLS_FALLBACK)
+      .order('statement_date', { ascending: false });
+  }
+  return full;
+}
+
 export async function fetchAllData(): Promise<AllData> {
   const [rulesRes, ledgerRes, reconRes] = await Promise.all([
     supabase
@@ -58,10 +78,7 @@ export async function fetchAllData(): Promise<AllData> {
       .eq('active', true)
       .order('lookup_priority', { ascending: true, nullsFirst: false })
       .order('carrier_name', { ascending: true }),
-    supabase
-      .from('commission_ledger')
-      .select(LEDGER_COLS)
-      .order('statement_date', { ascending: false }),
+    selectLedger(),
     supabase
       .from('commission_reconciliation')
       .select(RECON_COLS)
@@ -134,15 +151,28 @@ export async function deleteRule(appId: string): Promise<void> {
 
 // --- Policies (ledger) -----------------------------------------------------
 
+function stripBillingFeeCols(row: Record<string, unknown>): Record<string, unknown> {
+  const { billing_type: _b, agency_fee_amount: _a, ...rest } = row;
+  return rest;
+}
+
 export async function createPolicy(
   policy: WonPolicy,
   expectedCommission: number,
 ): Promise<WonPolicy> {
-  const { data, error } = await supabase
+  const payload = policyToLedgerRow(policy, expectedCommission);
+  let { data, error } = await supabase
     .from('commission_ledger')
-    .insert(policyToLedgerRow(policy, expectedCommission))
+    .insert(payload)
     .select(LEDGER_COLS)
     .single();
+  if (error && /billing_type|agency_fee_amount|column/i.test(error.message || '')) {
+    ({ data, error } = await supabase
+      .from('commission_ledger')
+      .insert(stripBillingFeeCols(payload))
+      .select(LEDGER_COLS_FALLBACK)
+      .single());
+  }
   if (error) fail('Add policy', error);
   return ledgerRowToPolicy(data as LedgerRow);
 }
@@ -160,12 +190,20 @@ export async function updatePolicy(
     nowcerts_policy_id: _ncid,
     ...updatable
   } = policyToLedgerRow(policy, expectedCommission);
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('commission_ledger')
     .update(updatable)
     .eq('id', policy.id)
     .select(LEDGER_COLS)
     .single();
+  if (error && /billing_type|agency_fee_amount|column/i.test(error.message || '')) {
+    ({ data, error } = await supabase
+      .from('commission_ledger')
+      .update(stripBillingFeeCols(updatable))
+      .eq('id', policy.id)
+      .select(LEDGER_COLS_FALLBACK)
+      .single());
+  }
   if (error) fail('Update policy', error);
   return ledgerRowToPolicy(data as LedgerRow);
 }

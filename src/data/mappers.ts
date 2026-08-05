@@ -65,6 +65,8 @@ export interface LedgerRow {
   // app-specific manual-entry columns
   payroll_amount: number | null;
   admin_fee_amount: number | null;
+  agency_fee_amount?: number | null;
+  billing_type?: string | null;
   monthly_premium_amount: number | null;
   payment_timing: string | null;
 }
@@ -172,6 +174,9 @@ export function ledgerRowToPolicy(row: LedgerRow): WonPolicy {
     payrollAmount: row.payroll_amount ?? undefined,
     numberOfEmployees: row.ee_count ?? undefined,
     adminFeeAmount: row.admin_fee_amount ?? undefined,
+    agencyFeeAmount:
+      row.agency_fee_amount ?? row.admin_fee_amount ?? undefined,
+    billingType: row.billing_type ?? undefined,
     monthlyPremiumAmount: row.monthly_premium_amount ?? undefined,
     paymentTiming:
       (row.payment_timing as 'As Earned' | 'In Advance' | null) ?? undefined,
@@ -205,7 +210,9 @@ export function policyToLedgerRow(
     gross_premium: policy.premiumAmount ?? null,
     ee_count: policy.numberOfEmployees ?? null,
     payroll_amount: policy.payrollAmount ?? null,
-    admin_fee_amount: policy.adminFeeAmount ?? null,
+    admin_fee_amount: policy.adminFeeAmount ?? policy.agencyFeeAmount ?? null,
+    agency_fee_amount: policy.agencyFeeAmount ?? policy.adminFeeAmount ?? null,
+    billing_type: policy.billingType?.trim() || null,
     monthly_premium_amount: policy.monthlyPremiumAmount ?? null,
     payment_timing: policy.paymentTiming ?? null,
     expected_commission: Number.isFinite(expectedCommission)
