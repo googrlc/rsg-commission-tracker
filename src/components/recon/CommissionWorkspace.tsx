@@ -2,22 +2,25 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Commission Workspace shell (§11) — hosts the statement-reconciliation tabs
- * (Reconciliation · Dashboard · Rates · Carriers) over the transaction layer.
- * Self-contained: its own nav + data; App enters it via one tab value and can
- * return to the classic Ledger/Rules view via onExit.
+ * Commission Workspace shell (§11) — hosts the statement tabs
+ * (Upload · Reconciliation · Dashboard · Rates · Carriers) over the
+ * transaction layer. Upload is its own tab so the money-gate is not buried
+ * above the exception queue. Self-contained: its own nav + data; App enters
+ * it via one tab value and can return to the classic Ledger/Rules view via
+ * onExit.
  */
 
 import React, { useState } from 'react';
-import { FileSpreadsheet, LogOut, ArrowLeft, ClipboardCheck, BarChart3, Percent, Building2 } from 'lucide-react';
+import { FileSpreadsheet, LogOut, ArrowLeft, ClipboardCheck, BarChart3, Percent, Building2, UploadCloud } from 'lucide-react';
 import ReconciliationWorkspace from './ReconciliationWorkspace';
 import StatementUpload from './StatementUpload';
 import RatesTab from './RatesTab';
 import DashboardTab from './DashboardTab';
 import CarriersTab from './CarriersTab';
 
-type Tab = 'reconciliation' | 'dashboard' | 'rates' | 'carriers';
+type Tab = 'upload' | 'reconciliation' | 'dashboard' | 'rates' | 'carriers';
 const TABS: Array<{ key: Tab; label: string; icon: React.ReactNode }> = [
+  { key: 'upload', label: 'Upload statement', icon: <UploadCloud className="w-4 h-4" /> },
   { key: 'reconciliation', label: 'Reconciliation', icon: <ClipboardCheck className="w-4 h-4" /> },
   { key: 'dashboard', label: 'Dashboard', icon: <BarChart3 className="w-4 h-4" /> },
   { key: 'rates', label: 'Rates', icon: <Percent className="w-4 h-4" /> },
@@ -31,11 +34,17 @@ export default function CommissionWorkspace({
   signOut: () => void;
   onExit: () => void;
 }) {
-  const [tab, setTab] = useState<Tab>('reconciliation');
+  // Land on Upload — the money-gate action people come here to do.
+  const [tab, setTab] = useState<Tab>('upload');
   const [prefill, setPrefill] = useState<{ carrier: string; lob: string | null } | null>(null);
   const [refresh, setRefresh] = useState(0);
 
   const fixRule = (carrier: string, lob: string | null) => { setPrefill({ carrier, lob }); setTab('rates'); };
+
+  const afterUpload = () => {
+    setRefresh((r) => r + 1);
+    setTab('reconciliation');
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
@@ -46,7 +55,7 @@ export default function CommissionWorkspace({
               <div className="p-2 bg-blue-600 rounded-lg"><FileSpreadsheet className="w-5 h-5" /></div>
               <div>
                 <h1 className="text-lg font-bold tracking-tight">Commission Workspace</h1>
-                <p className="text-slate-400 text-[11px] font-mono">Statement reconciliation · Risk Solutions Group</p>
+                <p className="text-slate-400 text-[11px] font-mono">Statement upload & reconciliation · Risk Solutions Group</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -71,11 +80,13 @@ export default function CommissionWorkspace({
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {tab === 'reconciliation' && (
-          <div className="space-y-6">
-            <StatementUpload uploadedBy={email} onUploaded={() => setRefresh((r) => r + 1)} />
-            <div key={refresh}><ReconciliationWorkspace onFixRule={fixRule} /></div>
+        {tab === 'upload' && (
+          <div className="max-w-3xl">
+            <StatementUpload uploadedBy={email} onUploaded={afterUpload} />
           </div>
+        )}
+        {tab === 'reconciliation' && (
+          <div key={refresh}><ReconciliationWorkspace onFixRule={fixRule} /></div>
         )}
         {tab === 'dashboard' && <div key={refresh}><DashboardTab /></div>}
         {tab === 'rates' && <RatesTab prefill={prefill} reviewedBy={email} />}
