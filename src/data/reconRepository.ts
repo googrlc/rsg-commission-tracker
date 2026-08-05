@@ -15,6 +15,7 @@ import type {
   CarrierProfile, CarrierAlias, RuleCoverage, RuleWithProvenance, RateIntake, CarrierMonthRow,
   CarrierPaymentSchedule,
 } from '../types';
+import { estimateCancelChargeback } from '../utils/cancelChargeback';
 
 function fail(context: string, error: { message: string }): never {
   throw new Error(`${context}: ${error.message}`);
@@ -47,31 +48,64 @@ export async function fetchReconSummary(): Promise<ReconSummary> {
   };
 }
 
-/** Earliest cancel/chargeback statement date per policy_number.
- * Used until v_reconciliation_exceptions.cancel_date is applied (slice8). */
-async function fetchStatementCancelDates(): Promise<Map<string, string>> {
+type StmtCancel = { date: string; realized: number };
+
+/** Earliest cancel/chargeback date + realized clawback $ per policy_number. */
+async function fetchStatementCancelFacts(): Promise<Map<string, StmtCancel>> {
   const { data, error } = await supabase
     .from('commission_transactions')
-    .select('policy_number, transaction_date, transaction_type')
+    .select('policy_number, transaction_date, transaction_type, commission_amount')
     .in('transaction_type', ['cancel', 'chargeback'])
-    .not('policy_number', 'is', null)
-    .not('transaction_date', 'is', null);
+    .not('policy_number', 'is', null);
   if (error) fail('Load statement cancel dates', error);
-  const earliest = new Map<string, string>();
+  const out = new Map<string, StmtCancel>();
   for (const r of data ?? []) {
     const pn = String((r as { policy_number?: string }).policy_number ?? '');
+    if (!pn) continue;
     const d = String((r as { transaction_date?: string }).transaction_date ?? '');
-    if (!pn || !d) continue;
-    const prev = earliest.get(pn);
-    if (!prev || d < prev) earliest.set(pn, d);
+    const amt = Number((r as { commission_amount?: number }).commission_amount ?? 0);
+    const cur = out.get(pn) ?? { date: d || '9999-99-99', realized: 0 };
+    if (d && d < cur.date) cur.date = d;
+    // Realized clawback is the absolute value of negative cancel/chargeback lines.
+    if (amt < 0) cur.realized += -amt;
+    else if (amt > 0) cur.realized += amt; // some feeds store clawback as positive
+    out.set(pn, cur);
   }
-  return earliest;
+  for (const [pn, v] of out) {
+    if (v.date === '9999-99-99') out.set(pn, { ...v, date: '' });
+  }
+  return out;
 }
 
 function midTerm(cancelDate: string | null, expirationDate: string | null): boolean {
   if (!cancelDate) return false;
   if (!expirationDate) return true;
   return cancelDate < expirationDate;
+}
+
+/** Resolve carrier_commission_profile.payment_model via alias map. */
+async function fetchPaymentModelByCarrier(): Promise<Map<string, string>> {
+  const [{ data: profiles, error: pErr }, { data: aliases, error: aErr }] = await Promise.all([
+    supabase.from('carrier_commission_profile').select('carrier_name, payment_model'),
+    supabase.from('carrier_alias_map').select('raw_name, canonical_carrier'),
+  ]);
+  if (pErr) fail('Load carrier payment models', pErr);
+  if (aErr) fail('Load carrier aliases', aErr);
+
+  const byCanonical = new Map<string, string>();
+  for (const p of profiles ?? []) {
+    const name = String((p as { carrier_name?: string }).carrier_name ?? '');
+    const model = String((p as { payment_model?: string }).payment_model ?? '');
+    if (name && model) byCanonical.set(name.toLowerCase(), model);
+  }
+  const out = new Map<string, string>(byCanonical);
+  for (const a of aliases ?? []) {
+    const raw = String((a as { raw_name?: string }).raw_name ?? '');
+    const canon = String((a as { canonical_carrier?: string }).canonical_carrier ?? '');
+    const model = byCanonical.get(canon.toLowerCase());
+    if (raw && model) out.set(raw.toLowerCase(), model);
+  }
+  return out;
 }
 
 export async function fetchReconExceptions(): Promise<ReconException[]> {
@@ -81,7 +115,6 @@ export async function fetchReconExceptions(): Promise<ReconException[]> {
     .select('exception_type, reconciliation_status, carrier_name, policy_number, client_name, lob, expected_commission, actual_commission, delta, effective_date, expiration_date, term_months, expected_pay_month, pay_basis, term_type, new_count, renewal_count, endorsement_count, cancel_count, cancel_date, is_mid_term_cancel');
 
   let rows: Record<string, unknown>[] = [];
-  let haveViewCancel = false;
   if (withCancel.error) {
     const { data, error } = await supabase
       .from('v_reconciliation_exceptions')
@@ -90,38 +123,61 @@ export async function fetchReconExceptions(): Promise<ReconException[]> {
     rows = (data ?? []) as Record<string, unknown>[];
   } else {
     rows = (withCancel.data ?? []) as Record<string, unknown>[];
-    haveViewCancel = true;
   }
 
-  const statementCancels = haveViewCancel ? null : await fetchStatementCancelDates();
+  const [statementCancels, paymentModels] = await Promise.all([
+    fetchStatementCancelFacts(),
+    fetchPaymentModelByCarrier(),
+  ]);
 
   return rows.map((r) => {
     const expirationDate = (r.expiration_date as string) ?? null;
+    const effectiveDate = (r.effective_date as string) ?? null;
+    const expectedCommission = n(r.expected_commission);
+    const carrierName = (r.carrier_name as string) ?? '';
+    const policyNumber = (r.policy_number as string) ?? null;
     const fromView = (r.cancel_date as string) ?? null;
-    const fromStmt = r.policy_number && statementCancels
-      ? statementCancels.get(String(r.policy_number)) ?? null
-      : null;
-    const cancelDate = fromView ?? fromStmt;
+    const stmt = policyNumber ? statementCancels.get(policyNumber) : undefined;
+    const cancelDate = fromView ?? (stmt?.date || null);
     const isMid = typeof r.is_mid_term_cancel === 'boolean'
       ? r.is_mid_term_cancel
       : midTerm(cancelDate, expirationDate);
+    const paymentModel = paymentModels.get(carrierName.toLowerCase()) ?? null;
+    const estimate = cancelDate
+      ? estimateCancelChargeback({
+          effectiveDate,
+          expirationDate,
+          cancelDate,
+          expectedCommission,
+          paymentModel,
+        })
+      : null;
+    const realized = stmt && stmt.realized > 0 ? Math.round(stmt.realized * 100) / 100 : null;
+
     return {
       exceptionType: r.exception_type as ReconException['exceptionType'],
       reconciliationStatus: r.reconciliation_status as ReconException['reconciliationStatus'],
-      carrierName: (r.carrier_name as string) ?? '',
-      policyNumber: (r.policy_number as string) ?? null,
+      carrierName,
+      policyNumber,
       clientName: (r.client_name as string) ?? null,
       lob: (r.lob as string) ?? null,
-      expectedCommission: n(r.expected_commission),
+      expectedCommission,
       actualCommission: n(r.actual_commission),
       delta: n(r.delta),
-      effectiveDate: (r.effective_date as string) ?? null,
+      effectiveDate,
       expirationDate,
       termMonths: n(r.term_months),
       expectedPayMonth: n(r.expected_pay_month),
       payBasis: (r.pay_basis as string) ?? null,
       cancelDate,
       isMidTermCancel: isMid,
+      paymentModel,
+      estimatedChargeback: estimate?.estimatedChargeback ?? null,
+      estimatedForgone: estimate?.estimatedForgone ?? null,
+      realizedClawback: realized,
+      cancelEstimateLabel: estimate?.primaryLabel ?? 'none',
+      cancelEstimateAmount: estimate?.primaryAmount ?? null,
+      cancelEstimateReason: estimate?.reason ?? null,
       termType: (r.term_type as ReconException['termType']) ?? null,
       newCount: n(r.new_count) ?? 0,
       renewalCount: n(r.renewal_count) ?? 0,

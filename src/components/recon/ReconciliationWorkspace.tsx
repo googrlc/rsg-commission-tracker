@@ -190,7 +190,7 @@ export default function ReconciliationWorkspace({
         }
       >
         <div className="overflow-x-auto -mx-2">
-          <table className="w-full text-xs min-w-[1080px]">
+          <table className="w-full text-xs min-w-[1200px]">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
                 <th className="text-left font-medium py-2 px-2">Client</th>
@@ -202,6 +202,9 @@ export default function ReconciliationWorkspace({
                 <th className="text-left font-medium px-2" title="Original term end from AMS. Cancel date is separate — mid-term cancels keep the full-term expiration.">
                   Term end / Cancel
                 </th>
+                <th className="text-right font-medium px-2" title="Pro-rata unearned: estimated chargeback (advance) or forgone (as-earned). Realized = statement cancel lines.">
+                  Est. chargeback
+                </th>
                 <th className="text-left font-medium px-2">Exp. pay</th>
                 <th className="text-right font-medium px-2">Expected</th>
                 <th className="text-right font-medium px-2">Actual</th>
@@ -212,7 +215,7 @@ export default function ReconciliationWorkspace({
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={13} className="text-center text-slate-400 py-6">No rows for this filter.</td></tr>
+                <tr><td colSpan={14} className="text-center text-slate-400 py-6">No rows for this filter.</td></tr>
               )}
               {filtered.map((r, i) => (
                 <tr key={`${r.carrierName}-${r.policyNumber}-${i}`}
@@ -236,14 +239,15 @@ export default function ReconciliationWorkspace({
                             ? 'bg-orange-50 text-orange-800 border-orange-200'
                             : 'bg-slate-100 text-slate-600 border-slate-200'
                         }`}
-                        title={r.isMidTermCancel
-                          ? 'Canceled before original term end — chargeback/clawback is expected for advance carriers'
-                          : 'Cancel date on or after original term end'}
+                        title={r.cancelEstimateReason ?? undefined}
                       >
                         Canceled {r.cancelDate}
                         {r.isMidTermCancel && <span className="uppercase tracking-wide">· mid-term</span>}
                       </div>
                     )}
+                  </td>
+                  <td className="px-2 text-right">
+                    <CancelEstimateCell r={r} />
                   </td>
                   <td className="px-2 font-mono text-slate-500" title={r.payBasis ?? undefined}>
                     {r.expectedPayMonth ? monthLabel(r.expectedPayMonth) : '—'}
@@ -275,6 +279,30 @@ export default function ReconciliationWorkspace({
       {/* Policy detail slide-over */}
       {selected && (
         <PolicySlideOver row={selected} txns={txns} onClose={() => { setSelected(null); setTxns(null); }} />
+      )}
+    </div>
+  );
+}
+
+/** Pro-rata cancel estimate — chargeback (advance) or forgone (as-earned). */
+function CancelEstimateCell({ r }: { r: ReconException }) {
+  if (!r.cancelDate || r.cancelEstimateAmount == null) {
+    return <span className="text-slate-300">—</span>;
+  }
+  const label =
+    r.cancelEstimateLabel === 'estimated_forgone' ? 'forgone'
+      : r.cancelEstimateLabel === 'unconfirmed' ? 'est. (review)'
+        : 'est. CB';
+  return (
+    <div className="text-right" title={r.cancelEstimateReason ?? undefined}>
+      <div className={`font-mono text-xs font-semibold ${r.cancelEstimateAmount > 0 ? 'text-rose-700' : 'text-slate-500'}`}>
+        {r.cancelEstimateAmount > 0 ? '−' : ''}{formatCurrencyDecimal(Math.abs(r.cancelEstimateAmount))}
+      </div>
+      <div className="text-[10px] text-slate-400">{label}{r.paymentModel ? ` · ${r.paymentModel}` : ''}</div>
+      {r.realizedClawback != null && r.realizedClawback > 0 && (
+        <div className="text-[10px] text-slate-500 font-mono" title="Already on statement cancel/chargeback lines">
+          realized −{formatCurrencyDecimal(r.realizedClawback)}
+        </div>
       )}
     </div>
   );
@@ -422,10 +450,30 @@ function PolicySlideOver({ row, txns, onClose }: {
             {row.cancelDate && (
               <p className={`text-[11px] font-semibold mt-1 ${row.isMidTermCancel ? 'text-orange-700' : 'text-slate-600'}`}>
                 Canceled {row.cancelDate}
-                {row.isMidTermCancel
-                  ? ' · mid-term (before original term end — chargeback/clawback expected on advance)'
-                  : ''}
+                {row.isMidTermCancel ? ' · mid-term' : ''}
               </p>
+            )}
+            {row.cancelEstimateAmount != null && (
+              <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50/60 px-3 py-2 text-[11px]">
+                <div className="font-semibold text-rose-900">
+                  {row.cancelEstimateLabel === 'estimated_forgone' ? 'Estimated forgone' : 'Estimated chargeback'}{' '}
+                  <span className="font-mono">−{formatCurrencyDecimal(Math.abs(row.cancelEstimateAmount))}</span>
+                  {row.paymentModel ? <span className="font-normal text-rose-700/80"> · {row.paymentModel}</span> : null}
+                </div>
+                {row.cancelEstimateReason && (
+                  <p className="text-rose-800/80 mt-0.5">{row.cancelEstimateReason}</p>
+                )}
+                {row.realizedClawback != null && row.realizedClawback > 0 && (
+                  <p className="text-rose-800/80 mt-0.5 font-mono">
+                    Realized on statement: −{formatCurrencyDecimal(row.realizedClawback)}
+                    {row.cancelEstimateAmount > 0 && (
+                      <span>
+                        {' '}· variance {formatCurrencyDecimal(row.realizedClawback - row.cancelEstimateAmount)}
+                      </span>
+                    )}
+                  </p>
+                )}
+              </div>
             )}
             {row.payBasis && <p className="text-[10px] text-slate-400 mt-0.5">{row.payBasis}</p>}
             <div className="mt-2 flex items-center gap-3 text-xs">

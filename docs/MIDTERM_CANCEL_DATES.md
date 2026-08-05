@@ -22,13 +22,34 @@ copies status / effective / expiration). So the AMS cancel date never reaches
 | Statement cancel date | `commission_transactions` where type ∈ {cancel, chargeback} | Operational fallback today |
 | Mid-term? | `cancel_date < expiration_date` | Why a chargeback makes sense |
 
+## Estimated chargeback (automatic)
+
+When a cancel date is known, the portal (and `hermes_finance.cancel_math`)
+pro-rates the unearned remainder of the term:
+
+```
+unearnedFraction = daysRemaining / termDays   # [effective → expiration)
+amount           = expected_commission × unearnedFraction
+```
+
+| Carrier `payment_model` | Lead figure | Meaning |
+|---|---|---|
+| **advance** | estimated chargeback | Carrier should claw back the unearned $ |
+| **as_earned** | estimated forgone | No clawback; opportunity loss on remainder |
+| **hybrid / unconfirmed** | est. (review) | Same pro-rata $, flagged for manual review |
+
+Cancel on/after original term end → **$0**. Missing dates or expected → no
+estimate. If statement cancel/chargeback lines already posted, the UI also shows
+**realized** clawback next to the estimate.
+
 ## What this repo does
 
-1. **Portal UI** — Exception queue "Term end / Cancel" column + slide-over + Churn
-   per-policy table show cancel date and a **mid-term** badge when cancel is
-   before original term end. Cancel dates are joined from statement lines until
-   the AMS field is synced.
-2. **`db/slice8_midterm_cancel_dates.sql`** — adds
+1. **Portal UI** — Exception queue "Term end / Cancel" + **Est. chargeback**
+   columns, slide-over estimate card, and Churn per-policy cancel dates. Cancel
+   dates are joined from statement lines until the AMS field is synced.
+2. **Math** — `src/utils/cancelChargeback.ts` and
+   `backend/hermes_finance/cancel_math.py` (pytest-covered).
+3. **`db/slice8_midterm_cancel_dates.sql`** — adds
    `commission_ledger.cancellation_date`, `v_policy_cancel_dates`, and extends
    `v_reconciliation_exceptions` with `cancel_date` / `is_mid_term_cancel`.
    Apply on the Supabase project when ready.
