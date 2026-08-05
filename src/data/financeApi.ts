@@ -75,6 +75,14 @@ export interface MatchPreview {
   will_be_unmatched?: number;
   unmatched_policy_numbers?: Record<string, number>;
   negative_lines?: number;
+  /** Lines typed cancel / chargeback. */
+  cancel_chargeback_lines?: number;
+  /** How many of those cancel lines got a pro-rata estimate from the ledger. */
+  cancel_estimates_priced?: number;
+  /** Sum of advance/unconfirmed est. clawbacks for priced cancel lines. */
+  estimated_chargeback_total?: number;
+  /** Sum of as-earned forgone for priced cancel lines. */
+  estimated_forgone_total?: number;
 }
 
 export interface StagedBatch {

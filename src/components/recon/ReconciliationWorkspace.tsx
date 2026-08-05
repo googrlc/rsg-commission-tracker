@@ -245,7 +245,7 @@ export default function ReconciliationWorkspace({
         }
       >
         <div className="overflow-x-auto -mx-2">
-          <table className="w-full text-xs min-w-[1080px]">
+          <table className="w-full text-xs min-w-[1200px]">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
                 <th className="text-left font-medium py-2 px-2">Client</th>
@@ -266,7 +266,12 @@ export default function ReconciliationWorkspace({
                 <th className="text-left font-medium px-2">LOB</th>
                 <th className="text-left font-medium px-2">Type</th>
                 <th className="text-left font-medium px-2">Effective</th>
-                <th className="text-left font-medium px-2">Expiration</th>
+                <th className="text-left font-medium px-2" title="Original term end from AMS. Cancel date is separate — mid-term cancels keep the full-term expiration.">
+                  Term end / Cancel
+                </th>
+                <th className="text-right font-medium px-2" title="Pro-rata unearned: estimated chargeback (advance) or forgone (as-earned). Realized = statement cancel lines.">
+                  Est. chargeback
+                </th>
                 <th className="text-left font-medium px-2">Exp. pay</th>
                 <th className="text-right font-medium px-2">Expected</th>
                 <th className="text-right font-medium px-2">Actual</th>
@@ -287,7 +292,7 @@ export default function ReconciliationWorkspace({
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={13} className="text-center text-slate-400 py-6">No rows for this filter.</td></tr>
+                <tr><td colSpan={14} className="text-center text-slate-400 py-6">No rows for this filter.</td></tr>
               )}
               {pageRows.map((r, i) => (
                 <tr key={`${r.carrierName}-${r.policyNumber}-${(safePage - 1) * PAGE_SIZE + i}`}
@@ -300,8 +305,26 @@ export default function ReconciliationWorkspace({
                   <td className="px-2 whitespace-nowrap"><TypeCell r={r} /></td>
                   <td className="px-2 font-mono text-slate-500">{r.effectiveDate ?? '—'}</td>
                   <td className="px-2 font-mono text-slate-500">
-                    {r.expirationDate ?? '—'}
-                    {r.termMonths != null && <span className="text-slate-400"> · {r.termMonths}mo</span>}
+                    <div>
+                      {r.expirationDate ?? '—'}
+                      {r.termMonths != null && <span className="text-slate-400"> · {r.termMonths}mo</span>}
+                    </div>
+                    {r.cancelDate && (
+                      <div
+                        className={`mt-0.5 inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                          r.isMidTermCancel
+                            ? 'bg-orange-50 text-orange-800 border-orange-200'
+                            : 'bg-slate-100 text-slate-600 border-slate-200'
+                        }`}
+                        title={r.cancelEstimateReason ?? undefined}
+                      >
+                        Canceled {r.cancelDate}
+                        {r.isMidTermCancel && <span className="uppercase tracking-wide">· mid-term</span>}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-2 text-right">
+                    <CancelEstimateCell r={r} />
                   </td>
                   <td className="px-2 font-mono text-slate-500" title={r.payBasis ?? undefined}>
                     {r.expectedPayMonth ? monthLabel(r.expectedPayMonth) : '—'}
@@ -367,6 +390,30 @@ export default function ReconciliationWorkspace({
   );
 }
 
+/** Pro-rata cancel estimate — chargeback (advance) or forgone (as-earned). */
+function CancelEstimateCell({ r }: { r: ReconException }) {
+  if (!r.cancelDate || r.cancelEstimateAmount == null) {
+    return <span className="text-slate-300">—</span>;
+  }
+  const label =
+    r.cancelEstimateLabel === 'estimated_forgone' ? 'forgone'
+      : r.cancelEstimateLabel === 'unconfirmed' ? 'est. (review)'
+        : 'est. CB';
+  return (
+    <div className="text-right" title={r.cancelEstimateReason ?? undefined}>
+      <div className={`font-mono text-xs font-semibold ${r.cancelEstimateAmount > 0 ? 'text-rose-700' : 'text-slate-500'}`}>
+        {r.cancelEstimateAmount > 0 ? '−' : ''}{formatCurrencyDecimal(Math.abs(r.cancelEstimateAmount))}
+      </div>
+      <div className="text-[10px] text-slate-400">{label}{r.paymentModel ? ` · ${r.paymentModel}` : ''}</div>
+      {r.realizedClawback != null && r.realizedClawback > 0 && (
+        <div className="text-[10px] text-slate-500 font-mono" title="Already on statement cancel/chargeback lines">
+          realized −{formatCurrencyDecimal(r.realizedClawback)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** New / Renewal term badge + endorsement/cancel line counts, so each recon row
  * shows how its commission is typed (spec: NB vs renewal vs endorsement). */
 function TypeCell({ r }: { r: ReconException }) {
@@ -396,23 +443,31 @@ function ChurnPanel({ loss, by, setBy }: {
   loss: LossOnCancel[]; by: 'client' | 'carrier'; setBy: (v: 'client' | 'carrier') => void;
 }) {
   const rolled = useMemo(() => {
-    const m = new Map<string, { key: string; cancels: number; loss: number; basis: string }>();
+    const m = new Map<string, { key: string; cancels: number; loss: number; basis: string; latestCancel: string | null }>();
     for (const l of loss) {
       const key = by === 'client' ? (l.clientName ?? l.insuredName ?? '—') : l.carrierName;
-      const cur = m.get(key) ?? { key, cancels: 0, loss: 0, basis: l.lossBasis };
+      const cur = m.get(key) ?? { key, cancels: 0, loss: 0, basis: l.lossBasis, latestCancel: null };
       cur.cancels += 1;
       cur.loss += l.lossAmount ?? Math.abs(l.realizedClawback);
+      if (l.transactionDate && (!cur.latestCancel || l.transactionDate > cur.latestCancel)) {
+        cur.latestCancel = l.transactionDate;
+      }
       m.set(key, cur);
     }
     return Array.from(m.values()).sort((a, b) => b.loss - a.loss);
   }, [loss, by]);
+
+  const perPolicy = useMemo(
+    () => [...loss].sort((a, b) => (b.transactionDate ?? '').localeCompare(a.transactionDate ?? '')),
+    [loss],
+  );
 
   const total = rolled.reduce((s, r) => s + r.loss, 0);
 
   return (
     <Card
       title="Churn — loss on cancel"
-      subtitle={`${loss.length} cancels · ${formatCurrencyDecimal(total)} lost · each row is a client to call`}
+      subtitle={`${loss.length} cancels · ${formatCurrencyDecimal(total)} lost · cancel date = statement Cancel Pro Rate / chargeback date`}
       right={
         <div className="flex rounded-lg border border-slate-200 overflow-hidden text-[11px]">
           {(['client', 'carrier'] as const).map((k) => (
@@ -424,20 +479,58 @@ function ChurnPanel({ loss, by, setBy }: {
         </div>
       }
     >
-      {rolled.length === 0 ? (
+      {loss.length === 0 ? (
         <p className="text-xs text-slate-400 py-4 text-center">No cancellations in the loaded statements.</p>
       ) : (
-        <div className="space-y-2">
-          {rolled.slice(0, 12).map((r) => (
-            <div key={r.key} className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <TrendingDown className="w-3.5 h-3.5 text-red-500 shrink-0" />
-                <span className="text-xs font-medium text-slate-700 truncate">{r.key}</span>
-                <span className="text-[10px] text-slate-400">{r.cancels} cancel{r.cancels > 1 ? 's' : ''}</span>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            {rolled.slice(0, 12).map((r) => (
+              <div key={r.key} className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <TrendingDown className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                  <span className="text-xs font-medium text-slate-700 truncate">{r.key}</span>
+                  <span className="text-[10px] text-slate-400">
+                    {r.cancels} cancel{r.cancels > 1 ? 's' : ''}
+                    {r.latestCancel ? ` · latest ${r.latestCancel}` : ''}
+                  </span>
+                </div>
+                <span className="font-mono text-xs font-semibold text-red-600 shrink-0">−{formatCurrencyDecimal(r.loss)}</span>
               </div>
-              <span className="font-mono text-xs font-semibold text-red-600 shrink-0">−{formatCurrencyDecimal(r.loss).replace('$', '$')}</span>
+            ))}
+          </div>
+          <div className="border-t border-slate-100 pt-3">
+            <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Per policy · cancel date</div>
+            <div className="overflow-x-auto max-h-56 overflow-y-auto -mx-1">
+              <table className="w-full text-xs min-w-[640px]">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                    <th className="text-left font-medium py-1.5 px-1">Client</th>
+                    <th className="text-left font-medium px-1">Carrier</th>
+                    <th className="text-left font-medium px-1">Policy #</th>
+                    <th className="text-left font-medium px-1">LOB</th>
+                    <th className="text-left font-medium px-1">Cancel date</th>
+                    <th className="text-right font-medium px-1">Clawback</th>
+                    <th className="text-left font-medium px-1">Basis</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {perPolicy.map((l, i) => (
+                    <tr key={`${l.policyNumber}-${l.transactionDate}-${i}`} className="border-b border-slate-50">
+                      <td className="py-1.5 px-1 text-slate-800 truncate max-w-[140px]">{l.clientName ?? l.insuredName ?? '—'}</td>
+                      <td className="px-1 text-slate-600">{l.carrierName}</td>
+                      <td className="px-1 font-mono text-slate-500">{l.policyNumber ?? '—'}</td>
+                      <td className="px-1 text-slate-500">{l.lob ?? '—'}</td>
+                      <td className="px-1 font-mono font-semibold text-orange-800">{l.transactionDate ?? '—'}</td>
+                      <td className="px-1 text-right font-mono text-red-600">
+                        −{formatCurrencyDecimal(l.lossAmount ?? Math.abs(l.realizedClawback))}
+                      </td>
+                      <td className="px-1 text-[10px] text-slate-400">{l.lossBasis}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ))}
+          </div>
         </div>
       )}
     </Card>
@@ -460,6 +553,34 @@ function PolicySlideOver({ row, txns, onClose }: {
               {row.termMonths != null && ` (${row.termMonths}mo)`}
               {row.expectedPayMonth ? ` · expected pay ${monthLabel(row.expectedPayMonth)}` : ''}
             </p>
+            {row.cancelDate && (
+              <p className={`text-[11px] font-semibold mt-1 ${row.isMidTermCancel ? 'text-orange-700' : 'text-slate-600'}`}>
+                Canceled {row.cancelDate}
+                {row.isMidTermCancel ? ' · mid-term' : ''}
+              </p>
+            )}
+            {row.cancelEstimateAmount != null && (
+              <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50/60 px-3 py-2 text-[11px]">
+                <div className="font-semibold text-rose-900">
+                  {row.cancelEstimateLabel === 'estimated_forgone' ? 'Estimated forgone' : 'Estimated chargeback'}{' '}
+                  <span className="font-mono">−{formatCurrencyDecimal(Math.abs(row.cancelEstimateAmount))}</span>
+                  {row.paymentModel ? <span className="font-normal text-rose-700/80"> · {row.paymentModel}</span> : null}
+                </div>
+                {row.cancelEstimateReason && (
+                  <p className="text-rose-800/80 mt-0.5">{row.cancelEstimateReason}</p>
+                )}
+                {row.realizedClawback != null && row.realizedClawback > 0 && (
+                  <p className="text-rose-800/80 mt-0.5 font-mono">
+                    Realized on statement: −{formatCurrencyDecimal(row.realizedClawback)}
+                    {row.cancelEstimateAmount > 0 && (
+                      <span>
+                        {' '}· variance {formatCurrencyDecimal(row.realizedClawback - row.cancelEstimateAmount)}
+                      </span>
+                    )}
+                  </p>
+                )}
+              </div>
+            )}
             {row.payBasis && <p className="text-[10px] text-slate-400 mt-0.5">{row.payBasis}</p>}
             <div className="mt-2 flex items-center gap-3 text-xs">
               <span className="text-slate-500">Expected <b className="font-mono text-slate-700">{row.expectedCommission == null ? '—' : formatCurrencyDecimal(row.expectedCommission)}</b></span>

@@ -131,11 +131,28 @@ export interface ReconException {
   actualCommission: number | null;
   delta: number | null;
   // Term + timing (sourced from NowCerts via commission_ledger; null until backfilled).
+  // expirationDate is the ORIGINAL term end — NowCerts does not shorten it on cancel.
   effectiveDate: string | null;
   expirationDate: string | null;
   termMonths: number | null;
   expectedPayMonth: number | null; // YYYYMM
   payBasis: string | null;         // human-readable, derived from carrier payment_model
+  // Mid-term cancel identity: AMS cancellation_date when synced, else first
+  // statement cancel/chargeback date. isMidTermCancel = cancel before term end.
+  cancelDate: string | null;
+  isMidTermCancel: boolean;
+  /** Carrier payment_model used for the cancel math (from carrier_commission_profile). */
+  paymentModel: string | null;
+  /** Pro-rata unearned $ the carrier is expected to claw back (advance) or $0 (as_earned). */
+  estimatedChargeback: number | null;
+  /** Opportunity loss on the unearned remainder (as_earned lead figure). */
+  estimatedForgone: number | null;
+  /** Abs sum of statement cancel/chargeback lines already booked (realized). */
+  realizedClawback: number | null;
+  /** Which figure to lead with in the UI. */
+  cancelEstimateLabel: 'estimated_chargeback' | 'estimated_forgone' | 'unconfirmed' | 'none';
+  cancelEstimateAmount: number | null;
+  cancelEstimateReason: string | null;
   // Commission typing: the term (New/Renewal) + a breakdown of the policy's line
   // types so New vs Renewal vs Endorsement vs Cancel is visible on the recon sheet.
   termType: 'New' | 'Renewal' | null;

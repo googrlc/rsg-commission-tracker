@@ -639,22 +639,64 @@ class StagedBatch:
         }
 
 
+def _carrier_payment_models(supa: "SupabaseClient") -> dict[str, str]:
+    """raw/canonical carrier name (lower) → payment_model."""
+    models: dict[str, str] = {}
+    try:
+        for p in supa.select(
+            "carrier_commission_profile",
+            columns="carrier_name,payment_model",
+            limit=1000,
+        ):
+            name = str(p.get("carrier_name") or "").strip().lower()
+            model = str(p.get("payment_model") or "").strip().lower()
+            if name and model:
+                models[name] = model
+    except Exception:  # noqa: BLE001
+        log.exception("statement preview: carrier profile read failed")
+    try:
+        for a in supa.select(
+            "carrier_alias_map",
+            columns="raw_name,canonical_carrier",
+            limit=5000,
+        ):
+            raw = str(a.get("raw_name") or "").strip().lower()
+            canon = str(a.get("canonical_carrier") or "").strip().lower()
+            if raw and canon and canon in models:
+                models[raw] = models[canon]
+    except Exception:  # noqa: BLE001
+        log.exception("statement preview: carrier alias read failed")
+    return models
+
+
 def _match_preview(supa: "SupabaseClient", lines: list[dict[str, Any]]) -> dict[str, Any]:
     """Where these lines WOULD land, without writing anything.
 
     The reviewer is approving a set of consequences, not a file. Showing the
     unmatched policy numbers up front is the difference between a considered
-    approval and a rubber stamp.
+    approval and a rubber stamp. Cancel/chargeback lines also get a pro-rata
+    estimated clawback/forgone total so mid-term cancels are priced before
+    approval.
     """
     from hermes_core import book as ams_book
+    from hermes_finance.cancel_math import estimate_cancel_chargeback
     from hermes_finance.matching import (
         MATCH_CREATED, MATCH_EXACT, MATCH_NORMALIZED, MATCH_UNMATCHED,
         _index_book, _index_ledger, match_line,
     )
 
+    ledger_by_id: dict[str, dict[str, Any]] = {}
     try:
-        ledger = supa.select("commission_ledger", columns="id,policy_number", limit=50000)
+        ledger = supa.select(
+            "commission_ledger",
+            columns=(
+                "id,policy_number,expected_commission,carrier_name,"
+                "policy_effective_date,policy_expiration_date,cancellation_date"
+            ),
+            limit=50000,
+        )
         exact_idx, norm_idx = _index_ledger(ledger)
+        ledger_by_id = {str(r["id"]): r for r in ledger if r.get("id")}
     except Exception:  # noqa: BLE001
         log.exception("statement preview: ledger read failed")
         exact_idx, norm_idx = {}, {}
@@ -667,9 +709,15 @@ def _match_preview(supa: "SupabaseClient", lines: list[dict[str, Any]]) -> dict[
         log.exception("statement preview: book read failed")
         book_idx = {}
 
+    payment_models = _carrier_payment_models(supa)
+
     counts = {MATCH_EXACT: 0, MATCH_NORMALIZED: 0, MATCH_CREATED: 0, MATCH_UNMATCHED: 0}
     unmatched: dict[str, int] = {}
     negatives = 0
+    cancel_lines = 0
+    est_chargeback = Decimal("0")
+    est_forgone = Decimal("0")
+    estimates_priced = 0
     for line in lines:
         if (line.get("commission_amount") or Decimal("0")) < 0:
             negatives += 1
@@ -680,12 +728,42 @@ def _match_preview(supa: "SupabaseClient", lines: list[dict[str, Any]]) -> dict[
             key = result.policy_number or "(blank)"
             unmatched[key] = unmatched.get(key, 0) + 1
 
+        ttype = str(line.get("transaction_type") or "")
+        if ttype not in ("cancel", "chargeback"):
+            continue
+        cancel_lines += 1
+        row = ledger_by_id.get(str(result.ledger_id or ""))
+        if not row:
+            continue
+        carrier = str(row.get("carrier_name") or line.get("carrier_name") or "").strip()
+        model = payment_models.get(carrier.lower())
+        cancel_dt = row.get("cancellation_date") or line.get("transaction_date")
+        est = estimate_cancel_chargeback(
+            expected_commission=row.get("expected_commission"),
+            effective_date=row.get("policy_effective_date"),
+            expiration_date=row.get("policy_expiration_date"),
+            cancel_date=cancel_dt,
+            payment_model=model,
+        )
+        if est.primary_label == "none" or est.primary_amount is None:
+            continue
+        estimates_priced += 1
+        if est.primary_label == "estimated_forgone":
+            est_forgone += est.primary_amount
+        else:
+            # advance + unconfirmed both surface the clawback-shaped figure
+            est_chargeback += est.estimated_chargeback or est.primary_amount
+
     return {
         "will_link": counts[MATCH_EXACT] + counts[MATCH_NORMALIZED],
         "will_create_ledger_rows": counts[MATCH_CREATED],
         "will_be_unmatched": counts[MATCH_UNMATCHED],
         "unmatched_policy_numbers": unmatched,
         "negative_lines": negatives,
+        "cancel_chargeback_lines": cancel_lines,
+        "cancel_estimates_priced": estimates_priced,
+        "estimated_chargeback_total": float(est_chargeback),
+        "estimated_forgone_total": float(est_forgone),
     }
 
 
