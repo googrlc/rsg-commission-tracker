@@ -256,6 +256,32 @@ def test_the_preview_says_where_lines_would_land(supa):
     assert staged.preview["negative_lines"] == 1
 
 
+CANCEL_CSV = b"""policy_number,insured_name,prod,tran_code,tran_date,month_end,gross_premium,comm_rate,gross_comm,net_due_agent,producer,agent_code
+P-CANCEL,ACME LLC,Auto,Cancel Pro Rate,06/15/2026,202606,1200,0.15,-100.55,-100.55,"COATES, GRETCHEN",03RC9
+"""
+
+
+def test_preview_prices_cancel_lines_against_ledger_expected(supa):
+    """Advance mid-term cancel → estimated chargeback before approval."""
+    # Same fixture as test_cancel_math: cancel Mar 2 → 121/181 unearned → $200.55
+    supa.tables["commission_ledger"] = [{
+        "id": "L1", "policy_number": "P-CANCEL", "carrier_name": "Progressive",
+        "expected_commission": 300, "policy_effective_date": "2026-01-01",
+        "policy_expiration_date": "2026-07-01", "cancellation_date": "2026-03-02",
+    }]
+    supa.tables["carrier_commission_profile"] = [
+        {"carrier_name": "Progressive", "payment_model": "advance"},
+    ]
+    staged = st.stage_statement(
+        supa, content=CANCEL_CSV, filename="cancel.csv",
+        uploaded_by="lamar@risksolutionsgroup.net", carrier="Progressive",
+    )
+    assert staged.preview["cancel_chargeback_lines"] == 1
+    assert staged.preview["cancel_estimates_priced"] == 1
+    assert staged.preview["estimated_chargeback_total"] == pytest.approx(200.55, abs=0.01)
+    assert staged.preview["estimated_forgone_total"] == 0.0
+
+
 # --- commit ------------------------------------------------------------------
 
 def _stage(supa, **kw):

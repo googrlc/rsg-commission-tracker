@@ -213,6 +213,29 @@ export default function StatementUpload({
                 {preview.negative_lines} negative line(s) — credits or chargebacks, booked as signed amounts.
               </p>
             )}
+            {(preview.cancel_chargeback_lines ?? 0) > 0 && (
+              <p className="mt-1 text-[11px] text-slate-600">
+                {preview.cancel_chargeback_lines} cancel/chargeback line(s)
+                {(preview.cancel_estimates_priced ?? 0) > 0 ? (
+                  <>
+                    {' '}· est. chargeback{' '}
+                    <span className="font-mono font-medium text-rose-700">
+                      ${(preview.estimated_chargeback_total ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    {(preview.estimated_forgone_total ?? 0) > 0 && (
+                      <>
+                        {' '}· est. forgone{' '}
+                        <span className="font-mono font-medium">
+                          ${(preview.estimated_forgone_total ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <> — no ledger dates/expected to price yet</>
+                )}
+              </p>
+            )}
           </div>
 
           {batch.warnings.length > 0 && (
