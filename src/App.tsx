@@ -2535,7 +2535,7 @@ export default function App() {
                     <tbody className="divide-y divide-slate-100 font-mono">
                       {policies.length === 0 ? (
                         <tr>
-                          <td colSpan={12} className="p-8 text-center text-slate-400 font-sans">
+                          <td colSpan={13} className="p-8 text-center text-slate-400 font-sans">
                             No active won policies logged. Click "Log New Won Policy" to get started!
                           </td>
                         </tr>
