@@ -154,6 +154,8 @@ export default function App() {
     payrollAmount: undefined,
     numberOfEmployees: undefined,
     adminFeeAmount: undefined,
+    agencyFeeAmount: undefined,
+    billingType: undefined,
     monthlyPremiumAmount: undefined,
     paymentTiming: undefined,
     manualExpectedAmount: undefined,
@@ -431,7 +433,9 @@ export default function App() {
       premiumAmount: policyFormData.premiumAmount,
       payrollAmount: policyFormData.payrollAmount,
       numberOfEmployees: policyFormData.numberOfEmployees,
-      adminFeeAmount: policyFormData.adminFeeAmount,
+      adminFeeAmount: policyFormData.adminFeeAmount ?? policyFormData.agencyFeeAmount,
+      agencyFeeAmount: policyFormData.agencyFeeAmount ?? policyFormData.adminFeeAmount,
+      billingType: policyFormData.billingType,
       monthlyPremiumAmount: policyFormData.monthlyPremiumAmount,
       paymentTiming: policyFormData.paymentTiming as 'As Earned' | 'In Advance' | undefined,
       manualExpectedAmount: policyFormData.manualExpectedAmount,
@@ -459,6 +463,8 @@ export default function App() {
         payrollAmount: undefined,
         numberOfEmployees: undefined,
         adminFeeAmount: undefined,
+        agencyFeeAmount: undefined,
+        billingType: undefined,
         monthlyPremiumAmount: undefined,
         paymentTiming: undefined,
         manualExpectedAmount: undefined,
@@ -2363,8 +2369,50 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Extra calculation inputs for advanced commission methods */}
+                        {/* Billing + agency fee (RSG charges insured) + advanced calc inputs */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-slate-100/50">
+                          <div>
+                            <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                              Billing type
+                            </label>
+                            <select
+                              value={policyFormData.billingType || ''}
+                              onChange={(e) =>
+                                setPolicyFormData({
+                                  ...policyFormData,
+                                  billingType: e.target.value === '' ? undefined : e.target.value
+                                })
+                              }
+                              className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white text-slate-700"
+                            >
+                              <option value="">— Not set —</option>
+                              <option value="Direct Bill">Direct Bill</option>
+                              <option value="Agency Bill">Agency Bill</option>
+                              <option value="Direct Bill 100">Direct Bill 100</option>
+                              <option value="Agency Bill 100">Agency Bill 100</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                              Agency fee ($) <span className="text-slate-400 font-normal">(RSG charges insured)</span>
+                            </label>
+                            <input
+                              type="number"
+                              placeholder="0.00"
+                              value={policyFormData.agencyFeeAmount ?? policyFormData.adminFeeAmount ?? ''}
+                              onChange={(e) => {
+                                const n = e.target.value === '' ? undefined : Number(e.target.value);
+                                setPolicyFormData({
+                                  ...policyFormData,
+                                  agencyFeeAmount: n,
+                                  adminFeeAmount: n,
+                                });
+                              }}
+                              className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white text-slate-700 font-mono"
+                            />
+                          </div>
+
                           <div>
                             <label className="block text-[11px] font-medium text-slate-500 mb-1">
                               Monthly Premium ($) <span className="text-slate-400 font-normal">(for % of Monthly Premium)</span>
@@ -2382,10 +2430,12 @@ export default function App() {
                               className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white text-slate-700 font-mono"
                             />
                           </div>
+                        </div>
 
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-[11px] font-medium text-slate-500 mb-1">
-                              Admin Fee Amount ($) <span className="text-slate-400 font-normal">(for % of Admin Fee)</span>
+                              Admin Fee Amount ($) <span className="text-slate-400 font-normal">(for % of Admin Fee rules)</span>
                             </label>
                             <input
                               type="number"
@@ -2473,6 +2523,8 @@ export default function App() {
                         <th className="p-3.5 font-semibold">Client</th>
                         <th className="p-3.5 font-semibold">Carrier</th>
                         <th className="p-3.5 font-semibold">Line of Business</th>
+                        <th className="p-3.5 font-semibold">Billing</th>
+                        <th className="p-3.5 text-right font-semibold">Agency fee</th>
                         <th className="p-3.5 font-semibold text-center">New/Renewal</th>
                         <th className="p-3.5 text-right font-semibold">Premium ($)</th>
                         <th className="p-3.5 font-semibold">Method</th>
@@ -2483,7 +2535,7 @@ export default function App() {
                     <tbody className="divide-y divide-slate-100 font-mono">
                       {policies.length === 0 ? (
                         <tr>
-                          <td colSpan={10} className="p-8 text-center text-slate-400 font-sans">
+                          <td colSpan={13} className="p-8 text-center text-slate-400 font-sans">
                             No active won policies logged. Click "Log New Won Policy" to get started!
                           </td>
                         </tr>
@@ -2507,6 +2559,18 @@ export default function App() {
                               <td className="p-3.5 text-slate-800 font-sans font-medium">{policy.clientName}</td>
                               <td className="p-3.5 text-slate-600 font-sans">{policy.carrier}</td>
                               <td className="p-3.5 text-slate-600 font-sans">{policy.lineOfBusiness}</td>
+                              <td className="p-3.5 font-sans">
+                                {/agency/i.test(policy.billingType || '') ? (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                    {policy.billingType || 'Agency Bill'}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-500 text-[11px]">{policy.billingType || '—'}</span>
+                                )}
+                              </td>
+                              <td className="p-3.5 text-right text-slate-700">
+                                {formatCurrency(policy.agencyFeeAmount ?? policy.adminFeeAmount)}
+                              </td>
                               <td className="p-3.5 text-center font-sans">
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                                   policy.newRenewal === 'New' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-slate-100 text-slate-700 border border-slate-200'
@@ -2640,6 +2704,26 @@ export default function App() {
                           <label className="block">
                             <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Payroll ($)</span>
                             <input type="number" step="0.01" value={detailForm.payrollAmount ?? ''} onChange={(e) => setDetailForm({ ...detailForm, payrollAmount: e.target.value === '' ? undefined : Number(e.target.value) })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Billing</span>
+                            <select value={detailForm.billingType ?? ''} onChange={(e) => setDetailForm({ ...detailForm, billingType: e.target.value || undefined })} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 bg-white">
+                              <option value="">— Not set —</option>
+                              <option value="Direct Bill">Direct Bill</option>
+                              <option value="Agency Bill">Agency Bill</option>
+                              <option value="Direct Bill 100">Direct Bill 100</option>
+                              <option value="Agency Bill 100">Agency Bill 100</option>
+                            </select>
+                          </label>
+                          <label className="block">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">Agency fee ($) · RSG → insured</span>
+                            <input type="number" step="0.01" value={detailForm.agencyFeeAmount ?? detailForm.adminFeeAmount ?? ''} onChange={(e) => {
+                              const n = e.target.value === '' ? undefined : Number(e.target.value);
+                              setDetailForm({ ...detailForm, agencyFeeAmount: n, adminFeeAmount: n });
+                            }} className="mt-1 w-full border border-slate-300 rounded-md px-2.5 py-1.5 font-mono text-right" />
                           </label>
                         </div>
 

@@ -215,7 +215,16 @@ class Overview:
 
 LEDGER_COLUMNS = (
     "id,policy_number,client_name,carrier_name,lob,gross_premium,expected_commission,"
-    "actual_commission,delta,reconciliation_status,statement_date"
+    "actual_commission,delta,reconciliation_status,statement_date,"
+    "policy_effective_date,billing_type,agency_fee_amount"
+)
+
+# Pre-migration DBs may lack billing/fee columns — fall back so /api/commissions
+# never 500s on a missing column.
+_LEDGER_COLUMNS_FALLBACK = (
+    "id,policy_number,client_name,carrier_name,lob,gross_premium,expected_commission,"
+    "actual_commission,delta,reconciliation_status,statement_date,"
+    "policy_effective_date"
 )
 
 
@@ -233,12 +242,25 @@ def commission_overview(
     """
     from hermes_core import book as ams_book
 
-    all_rows = supa.select(
-        LEDGER_TABLE,
-        columns=LEDGER_COLUMNS,
-        params={"order": "statement_date.desc"},
-        limit=max(limit, 5000),
-    )
+    try:
+        all_rows = supa.select(
+            LEDGER_TABLE,
+            columns=LEDGER_COLUMNS,
+            params={"order": "statement_date.desc"},
+            limit=max(limit, 5000),
+        )
+    except Exception:  # noqa: BLE001 — billing/fee cols may not be migrated yet
+        log.warning(
+            "commission surface: full ledger select failed; retrying without "
+            "billing_type/agency_fee_amount",
+            exc_info=True,
+        )
+        all_rows = supa.select(
+            LEDGER_TABLE,
+            columns=_LEDGER_COLUMNS_FALLBACK,
+            params={"order": "statement_date.desc"},
+            limit=max(limit, 5000),
+        )
 
     wanted = (status or "").strip().lower()
     if wanted and wanted != "all":
