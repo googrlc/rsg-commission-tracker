@@ -108,7 +108,7 @@ export default function StatementUpload({
   return (
     <Card
       title="Upload a carrier statement"
-      subtitle="Parsed and staged on upload — nothing is booked until you approve it. .xlsx · .csv · .pdf"
+      subtitle="Drop PDF, CSV, or Excel — we parse & stage it. Nothing is booked until you approve. .xlsx · .csv · .pdf"
     >
       {(phase === 'idle' || phase === 'staging') && (
         <div className="space-y-3">

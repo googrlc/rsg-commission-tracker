@@ -36,10 +36,10 @@ export default function DashboardPage({
               <button
                 type="button"
                 onClick={onOpenWorkspace}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg border border-blue-500 flex items-center gap-1.5"
-                title="Open statement upload & reconciliation workspace"
+                className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-lg flex items-center gap-1.5"
+                title="Upload PDF / CSV / Excel commission statements"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5" /> Reconciliation workspace
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Upload Statement
               </button>
               <button type="button" onClick={onExit} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg border border-slate-700 flex items-center gap-1.5">
                 <ArrowLeft className="w-3.5 h-3.5" /> Ledger & rules

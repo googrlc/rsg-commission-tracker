@@ -23,7 +23,8 @@ import {
   ArrowRight,
   Info,
   Calendar,
-  Clock
+  Clock,
+  UploadCloud
 } from 'lucide-react';
 import {
   BarChart,
@@ -75,11 +76,28 @@ export default function App() {
   const [dataError, setDataError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide' | 'workspace' | 'dashboard' | 'quickbooks' | 'calendar'>('recon');
+  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide' | 'workspace' | 'dashboard' | 'quickbooks' | 'calendar'>(() => {
+    // Deep-link: #upload / #workspace open the statement ingest UI directly.
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash.replace(/^#/, '').toLowerCase();
+      if (hash === 'upload' || hash === 'workspace' || hash === 'ingest') return 'workspace';
+      if (hash === 'dashboard') return 'dashboard';
+      if (hash === 'quickbooks' || hash === 'month-end') return 'quickbooks';
+      if (hash === 'calendar') return 'calendar';
+    }
+    return 'recon';
+  });
   const [rulesSubTab, setRulesSubTab] = useState<'rules' | 'schedules'>('rules');
   const [searchQuery, setSearchQuery] = useState('');
   const [reconFilter, setReconFilter] = useState<'All' | 'Shorts' | 'Perfect' | 'Excess'>('All');
   const [copiedCarrier, setCopiedCarrier] = useState<string | null>(null);
+
+  const openUploadWorkspace = () => {
+    setActiveTab('workspace');
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', '#upload');
+    }
+  };
 
   // Carrier filter for the Carrier Rules Matrix (look up one carrier's rules, e.g. Liberty Mutual).
   const [ruleCarrierFilter, setRuleCarrierFilter] = useState<string>('All');
@@ -960,7 +978,11 @@ export default function App() {
       <CommissionWorkspace
         email={email}
         signOut={signOut}
-        onExit={() => setActiveTab('recon')}
+        onExit={() => {
+          setActiveTab('recon');
+          if (typeof window !== 'undefined') window.history.replaceState(null, '', window.location.pathname);
+        }}
+        focusUpload
       />
     );
   }
@@ -972,7 +994,7 @@ export default function App() {
         email={email}
         signOut={signOut}
         onExit={() => setActiveTab('recon')}
-        onOpenWorkspace={() => setActiveTab('workspace')}
+        onOpenWorkspace={openUploadWorkspace}
       />
     );
   }
@@ -1044,6 +1066,14 @@ export default function App() {
             {/* Account + data controls */}
             <div className="flex flex-wrap items-center gap-2">
               <button
+                onClick={openUploadWorkspace}
+                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-bold rounded-lg shadow-lg shadow-emerald-500/25 transition flex items-center gap-2 ring-2 ring-emerald-300/40"
+                title="Upload PDF, CSV, or Excel carrier commission statements — parse, review, then book"
+              >
+                <UploadCloud className="w-4 h-4" />
+                Upload Statement
+              </button>
+              <button
                 onClick={() => setActiveTab('dashboard')}
                 className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition flex items-center gap-1.5"
                 title="Book-wide commission analytics dashboard"
@@ -1068,7 +1098,7 @@ export default function App() {
                 Pay Calendar
               </button>
               <button
-                onClick={() => setActiveTab('workspace')}
+                onClick={openUploadWorkspace}
                 className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg border border-blue-500 transition flex items-center gap-1.5"
                 title="Upload carrier statements and work the reconciliation queue"
               >
@@ -1174,6 +1204,39 @@ export default function App() {
 
       {/* Outer Layout & Quick Start Checklist Info */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        {/* Primary path: pull in carrier commission reports */}
+        <button
+          type="button"
+          onClick={openUploadWorkspace}
+          className="w-full text-left mb-6 rounded-xl border-2 border-emerald-400/70 bg-gradient-to-r from-emerald-50 via-white to-slate-50 shadow-sm hover:shadow-md hover:border-emerald-500 transition group overflow-hidden"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-5 sm:p-6">
+            <div className="p-3 rounded-xl bg-emerald-500 text-white shrink-0 shadow-md shadow-emerald-500/30 group-hover:scale-105 transition">
+              <UploadCloud className="w-7 h-7" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  Commission ingest
+                </span>
+                <span className="text-[10px] font-mono text-slate-500">PDF · CSV · Excel</span>
+              </div>
+              <h2 className="text-lg font-bold text-slate-900 tracking-tight">
+                Upload a carrier commission statement
+              </h2>
+              <p className="text-sm text-slate-600 mt-1 max-w-2xl">
+                Drop the carrier report here. The tracker parses it, shows what will match or create ledger rows, then you approve to book — nothing posts until you confirm.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+              <span className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 group-hover:bg-emerald-500 text-white text-sm font-bold">
+                Open upload
+                <ArrowRight className="w-4 h-4" />
+              </span>
+            </div>
+          </div>
+        </button>
         
         {/* Simple Workflow Guide Bar */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 mb-8 p-5">
@@ -1186,7 +1249,7 @@ export default function App() {
                 Catching Every Broker Short in 4 Seamless Steps
               </h2>
               <p className="text-slate-500 text-xs max-w-2xl">
-                Fill the Carrier rulebook, log won policies to secure an expected price projection, post direct statement payouts, and let the audit screen spot shortages for Quickbooks export.
+                Fill the Carrier rulebook, log won policies to secure an expected price projection, upload carrier statements (PDF/CSV/Excel) to book actuals, and let the audit screen spot shortages for Quickbooks export.
               </p>
             </div>
             <div className="flex flex-wrap gap-2.5">
@@ -1213,12 +1276,22 @@ export default function App() {
                 <ArrowRight className="w-3.5 h-3.5" />
               </div>
               <button
+                onClick={openUploadWorkspace}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold transition bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5"
+              >
+                <UploadCloud className="w-3.5 h-3.5" />
+                3. Upload Statement
+              </button>
+              <div className="self-center text-slate-300 hidden sm:block">
+                <ArrowRight className="w-3.5 h-3.5" />
+              </div>
+              <button
                 onClick={() => setActiveTab('recon')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
                   activeTab === 'recon' ? 'bg-slate-900 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                 }`}
               >
-                3. Reconciliation ({reconciliations.length})
+                4. Manual Recon ({reconciliations.length})
               </button>
               <div className="self-center text-slate-300 hidden sm:block">
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -1229,7 +1302,7 @@ export default function App() {
                   activeTab === 'queue' ? 'bg-slate-900 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                 }`}
               >
-                4. Shortage Queue
+                5. Shortage Queue
               </button>
               <div className="self-center text-slate-300 hidden sm:block">
                 <ArrowRight className="w-3.5 h-3.5" />
