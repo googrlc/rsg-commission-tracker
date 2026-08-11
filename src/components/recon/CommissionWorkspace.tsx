@@ -19,6 +19,7 @@ import StatementUpload from './StatementUpload';
 import RatesTab from './RatesTab';
 import DashboardTab from './DashboardTab';
 import CarriersTab from './CarriersTab';
+import { PendingApprovalQueue } from '../coordinator/WaitingOnManagerTab';
 
 type Tab = 'upload' | 'reconciliation' | 'dashboard' | 'rates' | 'carriers';
 const TABS: Array<{ key: Tab; label: string; icon: React.ReactNode; emphasize?: boolean }> = [
@@ -30,17 +31,19 @@ const TABS: Array<{ key: Tab; label: string; icon: React.ReactNode; emphasize?: 
 ];
 
 export default function CommissionWorkspace({
-  email, signOut, onExit, focusUpload = true,
+  email, signOut, onExit, focusUpload = true, canApprove = true,
 }: {
   email: string | null;
   signOut: () => void;
   onExit: () => void;
   /** When true (default), land on Upload so the ingest path is obvious. */
   focusUpload?: boolean;
+  canApprove?: boolean;
 }) {
   const [tab, setTab] = useState<Tab>(focusUpload ? 'upload' : 'reconciliation');
   const [prefill, setPrefill] = useState<{ carrier: string; lob: string | null } | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [showPending, setShowPending] = useState(false);
   const uploadAnchorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -73,6 +76,15 @@ export default function CommissionWorkspace({
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {canApprove && (
+                <button
+                  type="button"
+                  onClick={() => setShowPending((v) => !v)}
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg"
+                >
+                  Pending approval
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setTab('upload')}
@@ -105,6 +117,11 @@ export default function CommissionWorkspace({
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {showPending && canApprove && (
+          <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+            <PendingApprovalQueue email={email} canApprove={canApprove} />
+          </div>
+        )}
         {tab === 'upload' && (
           <div ref={uploadAnchorRef} className="max-w-3xl space-y-6 scroll-mt-4">
             <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-950">
@@ -119,7 +136,7 @@ export default function CommissionWorkspace({
                 </div>
               </div>
             </div>
-            <StatementUpload uploadedBy={email} onUploaded={afterUpload} />
+            <StatementUpload uploadedBy={email} onUploaded={afterUpload} canApprove={canApprove} />
           </div>
         )}
         {tab === 'reconciliation' && (
@@ -140,7 +157,7 @@ export default function CommissionWorkspace({
           </div>
         )}
         {tab === 'dashboard' && <div key={refresh}><DashboardTab /></div>}
-        {tab === 'rates' && <RatesTab prefill={prefill} reviewedBy={email} />}
+        {tab === 'rates' && <RatesTab prefill={prefill} reviewedBy={email} canApprove={canApprove} />}
         {tab === 'carriers' && <CarriersTab />}
       </main>
     </div>

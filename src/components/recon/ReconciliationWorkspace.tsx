@@ -43,6 +43,7 @@ export default function ReconciliationWorkspace({
   const [carrier, setCarrier] = useState('All');
   const [search, setSearch] = useState('');
   const [month, setMonth] = useState<number | 'all'>('all');
+  const [agencyBillOnly, setAgencyBillOnly] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('carrier');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [page, setPage] = useState(1);
@@ -113,6 +114,7 @@ export default function ReconciliationWorkspace({
       .filter((r) => (carrier === 'All' || r.carrierName === carrier))
       .filter((r) => month === 'all' || (r.policyNumber != null && policyToMonths.get(r.policyNumber)?.has(month)))
       .filter((r) => !q || (r.clientName ?? '').toLowerCase().includes(q) || (r.policyNumber ?? '').toLowerCase().includes(q))
+      .filter((r) => !agencyBillOnly || (r.billingType ?? '').toLowerCase().includes('agency'))
       .sort((a, b) => {
         if (sortKey === 'carrier') {
           const c = byCarrier(a, b);
@@ -122,10 +124,10 @@ export default function ReconciliationWorkspace({
         // When sorting by shortfall, still group carriers stably.
         return d !== 0 ? d : a.carrierName.localeCompare(b.carrierName);
       });
-  }, [rows, bucket, carrier, search, month, policyToMonths, sortKey, sortDir]);
+  }, [rows, bucket, carrier, search, month, policyToMonths, sortKey, sortDir, agencyBillOnly]);
 
   // Reset to page 1 whenever the working set changes.
-  useEffect(() => { setPage(1); }, [bucket, carrier, search, month, sortKey, sortDir, rows.length]);
+  useEffect(() => { setPage(1); }, [bucket, carrier, search, month, sortKey, sortDir, agencyBillOnly, rows.length]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
@@ -212,6 +214,18 @@ export default function ReconciliationWorkspace({
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="client / policy"
                 className="text-xs outline-none w-28" />
             </div>
+            <button
+              type="button"
+              onClick={() => setAgencyBillOnly((v) => !v)}
+              className={`text-[10px] font-semibold px-2 py-1 rounded border ${
+                agencyBillOnly
+                  ? 'bg-violet-100 text-violet-900 border-violet-300'
+                  : 'bg-white text-slate-600 border-slate-200'
+              }`}
+              title="Agency Bill stays on the chase list until commission is booked — not the same as a missing Progressive PDF"
+            >
+              Agency Bill only
+            </button>
             <select value={month} onChange={(e) => setMonth(e.target.value === 'all' ? 'all' : Number(e.target.value))}
               title="Reconcile one month at a time (statement activity)"
               className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
@@ -298,7 +312,17 @@ export default function ReconciliationWorkspace({
                 <tr key={`${r.carrierName}-${r.policyNumber}-${(safePage - 1) * PAGE_SIZE + i}`}
                   onClick={() => openPolicy(r)}
                   className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer">
-                  <td className="py-2 px-2 font-medium text-slate-800 max-w-[160px] truncate">{r.clientName ?? '—'}</td>
+                  <td className="py-2 px-2 font-medium text-slate-800 max-w-[160px] truncate">
+                    {r.clientName ?? '—'}
+                    {(r.billingType ?? '').toLowerCase().includes('agency') && (
+                      <span
+                        className="ml-1 inline-flex text-[9px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200"
+                        title="Agency Bill — Pending does not mean waiting on a carrier PDF"
+                      >
+                        Agency Bill
+                      </span>
+                    )}
+                  </td>
                   <td className="px-2 text-slate-600">{r.carrierName}</td>
                   <td className="px-2 font-mono text-slate-500">{r.policyNumber ?? '—'}</td>
                   <td className="px-2 text-slate-500">{r.lob ?? '—'}</td>

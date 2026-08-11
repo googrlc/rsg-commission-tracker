@@ -31,10 +31,12 @@ import { Card, formatCurrencyDecimal } from './shared';
 type Phase = 'idle' | 'staging' | 'review' | 'approving' | 'done' | 'error';
 
 export default function StatementUpload({
-  uploadedBy, onUploaded,
+  uploadedBy, onUploaded, canApprove = true,
 }: {
   uploadedBy: string | null;
   onUploaded?: () => void;
+  /** When false (coordinator), hide Approve/Reject — use handoff elsewhere. */
+  canApprove?: boolean;
 }) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [drag, setDrag] = useState(false);
@@ -262,14 +264,23 @@ export default function StatementUpload({
           )}
 
           <div className="flex gap-2">
-            <button
-              onClick={approve}
-              disabled={blocked || needsConfirmation}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg"
-            >
-              Approve &amp; book {batch.line_count} lines
-            </button>
-            <button onClick={reject} className="px-4 py-2 text-red-600 hover:text-red-800 text-sm">Reject</button>
+            {canApprove ? (
+              <>
+                <button
+                  onClick={approve}
+                  disabled={blocked || needsConfirmation}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg"
+                >
+                  Approve &amp; book {batch.line_count} lines
+                </button>
+                <button onClick={reject} className="px-4 py-2 text-red-600 hover:text-red-800 text-sm">Reject</button>
+              </>
+            ) : (
+              <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Staged for review. Coordinators submit packages from the Coordinator workspace —
+                you cannot approve or book money from this screen.
+              </p>
+            )}
             <button onClick={reset} className="px-4 py-2 text-slate-600 hover:text-slate-900 text-sm">Cancel</button>
           </div>
           {blocked && (

@@ -24,7 +24,13 @@ SPEC = ServiceSpec(
     name="finance",
     description="Commission rules, ledger, analytics, overrides, and the statement gate",
     router_modules=("hermes_finance.router",),
-    path_prefixes=("/api/commissions", "/api/commission-rules", "/api/commission-statements"),
+    path_prefixes=(
+        "/api/commissions",
+        "/api/commission-rules",
+        "/api/commission-statements",
+        "/api/commission-capabilities",
+        "/api/agency-bill",
+    ),
     port=8801,
     # Finance has no queue worker: its sync is a scheduled job, not a drained
     # queue. Listing an object_type here without an executor that honours the

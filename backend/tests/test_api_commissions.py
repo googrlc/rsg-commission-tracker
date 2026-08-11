@@ -124,7 +124,10 @@ class OverrideSupa:
         self.tables = {
             "commission_ledger": ledger,
             "agency_crm_users": [
-                {"email": "lamar@risksolutionsgroup.net", "active": True},
+                {"email": "lamar@risksolutionsgroup.net", "active": True},  # pragma: allowlist secret
+            ],
+            "app_allowlist": [
+                {"email": "lamar@risksolutionsgroup.net", "is_admin": True},  # pragma: allowlist secret
             ],
             "portal_overrides": [],
             "portal_write_log": [],
