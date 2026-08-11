@@ -126,6 +126,9 @@ export interface BatchSummary {
   uploaded_by: string | null;
   reviewed_by: string | null;
   created_at: string;
+  handoff_status?: string | null;
+  prepared_by?: string | null;
+  prep_checklist?: Record<string, unknown> | null;
 }
 
 // ── the statement gate ───────────────────────────────────────────────────────
@@ -197,4 +200,63 @@ export async function getBatch(batchId: string): Promise<{
   lines: Array<Record<string, unknown>>;
 }> {
   return request(`/api/commission-statements/${batchId}`);
+}
+
+/** Coordinator → approver handoff. Does not book money. */
+export function handoffStatement(
+  batchId: string,
+  preparedBy: string,
+  options?: {
+    handoffStatus?: 'draft' | 'ready_for_approval' | 'returned';
+    prepChecklist?: Record<string, unknown>;
+    returnNotes?: string;
+  },
+): Promise<{ ok: boolean; batch: Record<string, unknown> }> {
+  return request(`/api/commission-statements/${batchId}/handoff`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prepared_by: preparedBy,
+      handoff_status: options?.handoffStatus ?? 'ready_for_approval',
+      prep_checklist: options?.prepChecklist ?? null,
+      return_notes: options?.returnNotes ?? null,
+    }),
+  });
+}
+
+export function fetchCapabilities(email: string): Promise<{
+  role: string | null;
+  can_approve: boolean;
+  allowlisted: boolean;
+}> {
+  return request(`/api/commission-capabilities?email=${encodeURIComponent(email)}`);
+}
+
+export function submitRemittance(remittanceId: string, preparedBy: string) {
+  return request(`/api/agency-bill/remittances/${remittanceId}/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prepared_by: preparedBy }),
+  });
+}
+
+export function approveRemittance(remittanceId: string, approvedBy: string) {
+  return request(`/api/agency-bill/remittances/${remittanceId}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ approved_by: approvedBy }),
+  });
+}
+
+export function markRemittancePaid(
+  remittanceId: string, approvedBy: string, confirmationNumber?: string,
+) {
+  return request(`/api/agency-bill/remittances/${remittanceId}/mark-paid`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      approved_by: approvedBy,
+      confirmation_number: confirmationNumber ?? null,
+    }),
+  });
 }

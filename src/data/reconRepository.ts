@@ -125,9 +125,10 @@ export async function fetchReconExceptions(): Promise<ReconException[]> {
     rows = (withCancel.data ?? []) as Record<string, unknown>[];
   }
 
-  const [statementCancels, paymentModels] = await Promise.all([
+  const [statementCancels, paymentModels, billingByPolicy] = await Promise.all([
     fetchStatementCancelFacts(),
     fetchPaymentModelByCarrier(),
+    fetchBillingTypeByPolicy(),
   ]);
 
   return rows.map((r) => {
@@ -153,6 +154,9 @@ export async function fetchReconExceptions(): Promise<ReconException[]> {
         })
       : null;
     const realized = stmt && stmt.realized > 0 ? Math.round(stmt.realized * 100) / 100 : null;
+    const billingType = policyNumber
+      ? (billingByPolicy.get(policyNumber) ?? null)
+      : null;
 
     return {
       exceptionType: r.exception_type as ReconException['exceptionType'],
@@ -178,6 +182,7 @@ export async function fetchReconExceptions(): Promise<ReconException[]> {
       cancelEstimateLabel: estimate?.primaryLabel ?? 'none',
       cancelEstimateAmount: estimate?.primaryAmount ?? null,
       cancelEstimateReason: estimate?.reason ?? null,
+      billingType,
       termType: (r.term_type as ReconException['termType']) ?? null,
       newCount: n(r.new_count) ?? 0,
       renewalCount: n(r.renewal_count) ?? 0,
@@ -185,6 +190,25 @@ export async function fetchReconExceptions(): Promise<ReconException[]> {
       cancelCount: n(r.cancel_count) ?? 0,
     };
   });
+}
+
+async function fetchBillingTypeByPolicy(): Promise<Map<string, string>> {
+  const { data, error } = await supabase
+    .from('commission_ledger')
+    .select('policy_number, billing_type')
+    .not('billing_type', 'is', null);
+  if (error) {
+    // Column may be missing until slice9 — degrade quietly.
+    console.warn('billing_type lookup skipped:', error.message);
+    return new Map();
+  }
+  const out = new Map<string, string>();
+  for (const r of data ?? []) {
+    const pn = String((r as { policy_number?: string }).policy_number ?? '');
+    const bt = String((r as { billing_type?: string }).billing_type ?? '');
+    if (pn && bt) out.set(pn, bt);
+  }
+  return out;
 }
 
 export async function fetchPolicyTransactions(

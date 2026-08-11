@@ -25,10 +25,11 @@ function SourceBadge({ source }: { source: string | null }) {
 const confTone: Record<string, string> = { high: 'text-emerald-600', medium: 'text-amber-600', low: 'text-red-600' };
 
 export default function RatesTab({
-  prefill, reviewedBy,
+  prefill, reviewedBy, canApprove = true,
 }: {
   prefill?: { carrier: string; lob: string | null } | null;
   reviewedBy: string | null;
+  canApprove?: boolean;
 }) {
   const [coverage, setCoverage] = useState<RuleCoverage[]>([]);
   const [rules, setRules] = useState<RuleWithProvenance[]>([]);
@@ -150,14 +151,20 @@ export default function RatesTab({
                 </div>
                 {it.sourceDocument && <div className="text-[10px] text-slate-400 mt-1 truncate">from {it.sourceDocument}</div>}
                 <div className="mt-3 flex gap-2">
-                  <button disabled={busy === it.id} onClick={() => approve(it)}
-                    className="flex-1 inline-flex items-center justify-center gap-1 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded px-2 py-1.5">
-                    <ThumbsUp className="w-3.5 h-3.5" /> Approve
-                  </button>
-                  <button disabled={busy === it.id} onClick={() => reject(it)}
-                    className="inline-flex items-center justify-center gap-1 text-xs text-slate-600 hover:text-red-600 border border-slate-200 rounded px-2 py-1.5">
-                    <ThumbsDown className="w-3.5 h-3.5" /> Reject
-                  </button>
+                  {canApprove ? (
+                    <>
+                      <button disabled={busy === it.id} onClick={() => approve(it)}
+                        className="flex-1 inline-flex items-center justify-center gap-1 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded px-2 py-1.5">
+                        <ThumbsUp className="w-3.5 h-3.5" /> Approve
+                      </button>
+                      <button disabled={busy === it.id} onClick={() => reject(it)}
+                        className="inline-flex items-center justify-center gap-1 text-xs text-slate-600 hover:text-red-600 border border-slate-200 rounded px-2 py-1.5">
+                        <ThumbsDown className="w-3.5 h-3.5" /> Reject
+                      </button>
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-amber-800">Rate approval is approver-only.</p>
+                  )}
                 </div>
               </div>
             ))}
@@ -222,7 +229,11 @@ export default function RatesTab({
                       <td className={`px-2 font-semibold ${confTone[r.confidence ?? ''] ?? 'text-slate-400'}`}>{r.confidence ?? '—'}</td>
                       <td className="px-2 text-slate-400 font-mono">{r.lastConfirmedDate ?? '—'}</td>
                       <td className="px-2">
-                        <button onClick={() => startEdit(r)} className="text-slate-400 hover:text-blue-600"><Pencil className="w-3.5 h-3.5" /></button>
+                        {canApprove ? (
+                          <button onClick={() => startEdit(r)} className="text-slate-400 hover:text-blue-600"><Pencil className="w-3.5 h-3.5" /></button>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">read-only</span>
+                        )}
                       </td>
                     </>
                   )}

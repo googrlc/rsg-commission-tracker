@@ -157,6 +157,8 @@ export interface ReconException {
   cancelEstimateLabel: 'estimated_chargeback' | 'estimated_forgone' | 'unconfirmed' | 'none';
   cancelEstimateAmount: number | null;
   cancelEstimateReason: string | null;
+  /** AMS billing type when known — Agency Bill should not look like a missing carrier PDF. */
+  billingType: string | null;
   // Commission typing: the term (New/Renewal) + a breakdown of the policy's line
   // types so New vs Renewal vs Endorsement vs Cancel is visible on the recon sheet.
   termType: 'New' | 'Renewal' | null;

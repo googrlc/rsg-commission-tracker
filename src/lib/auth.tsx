@@ -14,12 +14,18 @@ import type { Session } from '@supabase/supabase-js';
 import { Lock, Mail, KeyRound, ShieldAlert, Loader2, LogOut } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './supabase';
 
+export type CommissionRole = 'approver' | 'coordinator' | null;
+
 interface AuthState {
   session: Session | null;
   email: string | null;
   loading: boolean;
   /** null = not yet checked, true/false = allowlist result */
   allowlisted: boolean | null;
+  /** Approver may book money; coordinator may only prepare. null until checked. */
+  role: CommissionRole;
+  canApprove: boolean;
+  capabilitiesLoading: boolean;
   signOut: () => Promise<void>;
 }
 
@@ -35,6 +41,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [allowlisted, setAllowlisted] = useState<boolean | null>(null);
+  const [role, setRole] = useState<CommissionRole>(null);
+  const [canApprove, setCanApprove] = useState(false);
+  const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
 
   // Ask the database whether the signed-in email is on the allowlist. The RLS
   // policies are the real enforcement; this just drives a friendly UI gate.
@@ -46,6 +55,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     setAllowlisted(Boolean(data));
+  }, []);
+
+  const checkCapabilities = useCallback(async (email: string | undefined | null) => {
+    if (!email) {
+      setRole(null);
+      setCanApprove(false);
+      setCapabilitiesLoading(false);
+      return;
+    }
+    setCapabilitiesLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('commission_user_capabilities');
+      if (!error && data && typeof data === 'object') {
+        const caps = data as { role?: string; can_approve?: boolean };
+        const nextRole = caps.role === 'approver' || caps.role === 'coordinator' ? caps.role : null;
+        setRole(nextRole);
+        setCanApprove(Boolean(caps.can_approve));
+        return;
+      }
+      // Fallback when SQL RPC is not applied yet: treat as coordinator (fail closed).
+      if (error) console.warn('Capabilities RPC unavailable; defaulting to coordinator:', error.message);
+      setRole('coordinator');
+      setCanApprove(false);
+    } finally {
+      setCapabilitiesLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -91,13 +126,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (session) checkAllowlist();
-    else setAllowlisted(null);
-  }, [session, checkAllowlist]);
+    if (session) {
+      checkAllowlist();
+      void checkCapabilities(session.user?.email);
+    } else {
+      setAllowlisted(null);
+      setRole(null);
+      setCanApprove(false);
+    }
+  }, [session, checkAllowlist, checkCapabilities]);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     setAllowlisted(null);
+    setRole(null);
+    setCanApprove(false);
   }, []);
 
   const value: AuthState = {
@@ -105,6 +148,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email: session?.user?.email ?? null,
     loading,
     allowlisted,
+    role,
+    canApprove,
+    capabilitiesLoading,
     signOut,
   };
 

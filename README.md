@@ -66,6 +66,12 @@ The 6-digit OTP code path works without this.
 
 ## RSG Ops Notes (July 2026)
 
+- **Coordinator portal (WFH hire):** same Tailscale URL, **individual login**,
+  `app_allowlist.is_admin=false`. Guided UI at `#coordinator`. See
+  [`docs/COORDINATOR_REMOTE_ACCESS.md`](docs/COORDINATOR_REMOTE_ACCESS.md) and
+  apply [`db/coordinator_portal.sql`](db/coordinator_portal.sql). Shared
+  autologin must not be the coordinator’s identity.
+
 - **Architecture (current):** runs **privately on the `hermes-gretch` box**,
   Docker container `rsg-commission-tracker-tailnet` on `127.0.0.1:3300`, exposed
   **Tailscale-only** at `https://hermes-gretch.tail1cbc83.ts.net:8446/`

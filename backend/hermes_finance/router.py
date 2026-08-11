@@ -20,6 +20,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from hermes_app import deps
+from hermes_finance.permissions import capabilities_for_email, require_approver
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,14 @@ class CommissionRuleRequest(BaseModel):
     renewal_percent: float | None = None
     commission_basis: str | None = "gross"
     active: bool = True
+    # Named actor — required so coordinators cannot write rates via the API.
+    changed_by: str | None = None
+
+
+@router.get("/api/commission-capabilities")
+def commission_capabilities(email: str):
+    """Role for the signed-in user — mirrors SQL ``commission_user_capabilities``."""
+    return capabilities_for_email(deps.get_supa(), email)
 
 
 @router.get("/api/commission-rules")
@@ -52,6 +61,11 @@ def upsert_commission_rule(req: CommissionRuleRequest):
     """Add or update a commission term (carrier + LOB rate). Feeds expected
     commission when NowCerts doesn't carry an agency commission amount."""
     supa = deps.get_supa()
+    actor = (req.changed_by or "").strip()
+    if not actor:
+        raise HTTPException(status_code=400, detail="changed_by is required")
+    deps.require_users(supa, [("changed_by", actor)])
+    require_approver(supa, actor, action="change commission rates")
     payload = {k: v for k, v in {
         "carrier_name": (req.carrier_name or "").strip(),
         "lob": (req.lob or "").strip(),
@@ -133,6 +147,7 @@ def override_commission_field(ledger_id: str, req: CommissionOverrideRequest):
 
     supa = deps.get_supa()
     deps.require_users(supa, [("approved_by", req.approved_by)])
+    require_approver(supa, req.approved_by, action="override commission ledger fields")
 
     field_name = (req.field_name or "").strip()
     if field_name not in OVERRIDABLE_FIELDS:
@@ -187,6 +202,7 @@ def withdraw_commission_override(override_id: str, approved_by: str):
 
     supa = deps.get_supa()
     deps.require_users(supa, [("approved_by", approved_by)])
+    require_approver(supa, approved_by, action="withdraw commission overrides")
     try:
         row = withdraw(supa, override_id, actor=approved_by)
     except ValueError as exc:
@@ -298,6 +314,7 @@ def approve_commission_statement(batch_id: str, req: StatementDecision):
 
     supa = deps.get_supa()
     deps.require_users(supa, [("approved_by", req.approved_by)])
+    require_approver(supa, req.approved_by, action="approve and book commission statements")
     try:
         result = commit_statement(supa, batch_id=batch_id, approved_by=req.approved_by,
                                   confirmed_source=req.confirmed_source)
@@ -316,6 +333,7 @@ def reject_commission_statement(batch_id: str, req: StatementDecision):
 
     supa = deps.get_supa()
     deps.require_users(supa, [("approved_by", req.approved_by)])
+    require_approver(supa, req.approved_by, action="reject commission statements")
     try:
         row = reject_statement(supa, batch_id=batch_id,
                                reviewed_by=req.approved_by, reason=req.reason)
@@ -325,3 +343,146 @@ def reject_commission_statement(batch_id: str, req: StatementDecision):
         log.exception("statement reject failed: %s", batch_id)
         raise HTTPException(status_code=502, detail=str(exc))
     return {"ok": True, "batch": row}
+
+
+class StatementHandoff(BaseModel):
+    prepared_by: str
+    handoff_status: str = "ready_for_approval"
+    prep_checklist: dict[str, Any] | None = None
+    return_notes: str | None = None
+
+
+@router.post("/api/commission-statements/{batch_id}/handoff")
+def handoff_commission_statement(batch_id: str, req: StatementHandoff):
+    """Coordinator marks a staged batch ready for (or returned from) approval.
+
+    Does not book money. Coordinators and approvers may both call this.
+    """
+    from hermes_finance.statements import BATCHES_TABLE
+
+    allowed = {"draft", "ready_for_approval", "returned"}
+    status = (req.handoff_status or "").strip()
+    if status not in allowed:
+        raise HTTPException(status_code=400, detail=f"handoff_status must be one of {sorted(allowed)}")
+
+    supa = deps.get_supa()
+    deps.require_users(supa, [("prepared_by", req.prepared_by)])
+    rows = supa.select(BATCHES_TABLE, columns="*", params={"id": f"eq.{batch_id}"}, limit=1)
+    if not rows:
+        raise HTTPException(status_code=404, detail="batch not found")
+
+    from datetime import datetime
+
+    payload: dict[str, Any] = {
+        "handoff_status": status,
+        "prepared_by": req.prepared_by,
+        "prepared_at": datetime.now().astimezone().isoformat(),
+    }
+    if req.prep_checklist is not None:
+        payload["prep_checklist"] = req.prep_checklist
+    if req.return_notes:
+        flags = dict(rows[0].get("flags") or {})
+        flags["return_notes"] = req.return_notes
+        payload["flags"] = flags
+    try:
+        row = supa.update(BATCHES_TABLE, batch_id, payload)
+    except Exception as exc:
+        log.exception("statement handoff failed: %s", batch_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "batch": row}
+
+
+class RemittanceDecision(BaseModel):
+    approved_by: str
+    confirmation_number: str | None = None
+    reason: str | None = None
+
+
+class RemittanceSubmit(BaseModel):
+    prepared_by: str
+
+
+@router.post("/api/agency-bill/remittances/{remittance_id}/submit")
+def submit_agency_bill_remittance(remittance_id: str, req: RemittanceSubmit):
+    """Coordinator submits a drafted remittance for manager approval."""
+    from datetime import datetime
+
+    supa = deps.get_supa()
+    deps.require_users(supa, [("prepared_by", req.prepared_by)])
+    rows = supa.select(
+        "agency_bill_remittances", columns="*",
+        params={"id": f"eq.{remittance_id}"}, limit=1,
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="remittance not found")
+    if rows[0].get("status") not in ("drafted", "returned"):
+        raise HTTPException(status_code=400, detail=f"remittance is {rows[0].get('status')}")
+    try:
+        row = supa.update("agency_bill_remittances", remittance_id, {
+            "status": "pending_approval",
+            "prepared_by": req.prepared_by,
+            "updated_at": datetime.now().astimezone().isoformat(),
+        })
+    except Exception as exc:
+        log.exception("remittance submit failed: %s", remittance_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "remittance": row}
+
+
+@router.post("/api/agency-bill/remittances/{remittance_id}/approve")
+def approve_agency_bill_remittance(remittance_id: str, req: RemittanceDecision):
+    """Approver-only: authorize the prepared carrier remittance (does not send ACH)."""
+    from datetime import datetime
+
+    supa = deps.get_supa()
+    deps.require_users(supa, [("approved_by", req.approved_by)])
+    require_approver(supa, req.approved_by, action="approve agency-bill remittances")
+    rows = supa.select(
+        "agency_bill_remittances", columns="*",
+        params={"id": f"eq.{remittance_id}"}, limit=1,
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="remittance not found")
+    if rows[0].get("status") != "pending_approval":
+        raise HTTPException(status_code=400, detail=f"remittance is {rows[0].get('status')}")
+    try:
+        row = supa.update("agency_bill_remittances", remittance_id, {
+            "status": "approved",
+            "approved_by": req.approved_by,
+            "approved_at": datetime.now().astimezone().isoformat(),
+            "updated_at": datetime.now().astimezone().isoformat(),
+        })
+    except Exception as exc:
+        log.exception("remittance approve failed: %s", remittance_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "remittance": row}
+
+
+@router.post("/api/agency-bill/remittances/{remittance_id}/mark-paid")
+def mark_agency_bill_remittance_paid(remittance_id: str, req: RemittanceDecision):
+    """Approver-only: record that payment was released outside the app."""
+    from datetime import datetime
+
+    supa = deps.get_supa()
+    deps.require_users(supa, [("approved_by", req.approved_by)])
+    require_approver(supa, req.approved_by, action="mark agency-bill remittances paid")
+    rows = supa.select(
+        "agency_bill_remittances", columns="*",
+        params={"id": f"eq.{remittance_id}"}, limit=1,
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="remittance not found")
+    if rows[0].get("status") not in ("approved", "pending_approval"):
+        raise HTTPException(status_code=400, detail=f"remittance is {rows[0].get('status')}")
+    try:
+        row = supa.update("agency_bill_remittances", remittance_id, {
+            "status": "paid",
+            "approved_by": req.approved_by,
+            "confirmation_number": req.confirmation_number,
+            "paid_at": datetime.now().astimezone().isoformat(),
+            "updated_at": datetime.now().astimezone().isoformat(),
+        })
+    except Exception as exc:
+        log.exception("remittance mark-paid failed: %s", remittance_id)
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "remittance": row}

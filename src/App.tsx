@@ -55,9 +55,10 @@ import CommissionWorkspace from './components/recon/CommissionWorkspace';
 import DashboardPage from './components/recon/DashboardPage';
 import QuickBooksSummaryPage from './components/recon/QuickBooksSummaryPage';
 import CarrierCalendarPage from './components/recon/CarrierCalendarPage';
+import CoordinatorWorkspace from './components/coordinator/CoordinatorWorkspace';
 
 export default function App() {
-  const { email, signOut } = useAuth();
+  const { email, signOut, role, canApprove, capabilitiesLoading } = useAuth();
 
   // Carrier pay-day calendars have no matching Supabase table yet, so they stay
   // in localStorage (non-sensitive reference data — no client names/premiums).
@@ -76,10 +77,11 @@ export default function App() {
   const [dataError, setDataError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide' | 'workspace' | 'dashboard' | 'quickbooks' | 'calendar'>(() => {
+  const [activeTab, setActiveTab] = useState<'recon' | 'policies' | 'rules' | 'queue' | 'guide' | 'workspace' | 'dashboard' | 'quickbooks' | 'calendar' | 'coordinator'>(() => {
     // Deep-link: #upload / #workspace open the statement ingest UI directly.
     if (typeof window !== 'undefined') {
       const hash = window.location.hash.replace(/^#/, '').toLowerCase();
+      if (hash === 'coordinator') return 'coordinator';
       if (hash === 'upload' || hash === 'workspace' || hash === 'ingest') return 'workspace';
       if (hash === 'dashboard') return 'dashboard';
       if (hash === 'quickbooks' || hash === 'month-end') return 'quickbooks';
@@ -98,6 +100,17 @@ export default function App() {
       window.history.replaceState(null, '', '#upload');
     }
   };
+
+  // Coordinators land in the guided sole-job workspace (never the classic ledger).
+  useEffect(() => {
+    if (capabilitiesLoading) return;
+    if (role === 'coordinator' && !canApprove) {
+      setActiveTab('coordinator');
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', '#coordinator');
+      }
+    }
+  }, [role, canApprove, capabilitiesLoading]);
 
   // Carrier filter for the Carrier Rules Matrix (look up one carrier's rules, e.g. Liberty Mutual).
   const [ruleCarrierFilter, setRuleCarrierFilter] = useState<string>('All');
@@ -973,11 +986,22 @@ export default function App() {
 
   // §11 Commission Workspace (statement reconciliation) — a self-contained shell
   // over the transaction layer. Entered from the classic view; returns via onExit.
+  if (activeTab === 'coordinator') {
+    return (
+      <CoordinatorWorkspace
+        email={email}
+        signOut={signOut}
+        canApprove={canApprove}
+      />
+    );
+  }
+
   if (activeTab === 'workspace') {
     return (
       <CommissionWorkspace
         email={email}
         signOut={signOut}
+        canApprove={canApprove}
         onExit={() => {
           setActiveTab('recon');
           if (typeof window !== 'undefined') window.history.replaceState(null, '', window.location.pathname);
