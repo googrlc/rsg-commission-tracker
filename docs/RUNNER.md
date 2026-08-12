@@ -16,10 +16,11 @@ a statement but a person, by name.**
 | 2:40 | `hermes --commission-inbox` | rsg-hermes (mirrored) | Stages every new statement in the Nextcloud drop folder. |
 | 2:50 | `hermes --commission-reconcile` | rsg-hermes (mirrored) | Links orphaned statement lines, then re-derives actual/status for every affected ledger row. |
 | 6:00 | `hermes --commission-watchdog` | rsg-hermes (mirrored) | Checks the chain above actually ran and that coverage still balances. Alerts `#systems-check` only on a problem. |
+| 6:15 | `hermes --commission-dq` | rsg-hermes | Report-only AMS vs rulebook vs ledger anomalies (NB/renewal, rate, timing, Agency Bill). See rsg-hermes `docs/commission-dq.md`. |
 
 The first three already existed and work — `canonical_policies` and the ledger
 were both refreshed by them this morning. The last three are what this repo
-adds.
+adds. Commission DQ lives in rsg-hermes (not mirrored here).
 
 ### Why reconcile runs on a clock
 
